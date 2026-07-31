@@ -1,7 +1,7 @@
 # Kitsune Nearby Storage Search Design
 
 **Date:** 2026-07-31
-**Status:** Approved for implementation planning
+**Status:** Approved for implementation planning; protection scope revised to SPI plus LWCX
 **Primary runtime:** Paper 1.21.4 on Java 21
 
 ## Summary
@@ -19,7 +19,7 @@ The core plugin ships a deterministic sparse tag embedding. It does not bundle O
 - Preserve the full root-to-leaf path for items inside shulker boxes, bundles, and registered custom nested containers.
 - Keep normal output visually small; expose scores, metadata, coordinates, and nested trees only with `--verbose`.
 - Prevent result counts, contents, coordinates, and markers from leaking protected storage.
-- Ship optional Bolt and LWC adapters while allowing other plugins to register protection providers.
+- Ship an optional LWCX adapter while allowing Bolt and every other protection plugin to register `BlockAccessProvider` through a separate bridge.
 - Give unknown custom items a useful fallback descriptor instead of omitting them.
 
 ## Non-goals
@@ -29,7 +29,7 @@ The core plugin ships a deterministic sparse tag embedding. It does not bundle O
 - No forced chunk loads, offline-world search, player inventories, player-scoped ender-chest contents, or entity inventories.
 - No bundled ONNX runtime, bundled language model, or required external embedding service.
 - No inference of opaque custom backpack contents without a registered nested-contents provider.
-- No built-in land-claim compatibility matrix beyond the generic protection SPI and the two selected popular container-lock adapters, Bolt and LWC.
+- No built-in land-claim compatibility matrix or unverified Bolt adapter; core ships the generic protection SPI and the source-verified LWCX integration.
 - No permanent holograms or world block changes.
 
 ## Terminology
@@ -230,7 +230,7 @@ The core nested providers support shulker-box block-state contents and bundle co
 
 All checks execute on the server thread. Any `DENY` wins. If one or more providers allow and none deny, access is allowed. If every provider returns `NOT_APPLICABLE`, the ordinary unprotected root is allowed.
 
-An exception from an applicable provider is treated as `DENY` for that root and query, with rate-limited diagnostics. If Bolt or LWC is detected but its selected adapter cannot initialize, Kitsune disables search rather than running without the expected privacy boundary.
+An exception from an applicable provider is treated as `DENY` for that root and query, with rate-limited diagnostics. If LWC is detected but its adapter cannot initialize, Kitsune disables search rather than running without the expected privacy boundary.
 
 ### Query-level privacy
 
@@ -245,9 +245,9 @@ Denied roots do not contribute to visible totals, truncation totals, empty-state
 
 ### Built-in and external integrations
 
-The core plugin runs without a protection plugin. Bolt and LWC adapters are optional compile-only integrations declared as soft plugin relationships and isolated from the core search package. If both apply to one root, the composite denial rule remains authoritative.
+The core plugin runs without a protection plugin. The LWCX adapter is an optional compile-only integration declared as a soft plugin relationship and isolated from the core search package.
 
-Other protection or claim plugins integrate by registering `BlockAccessProvider`; Kitsune does not import every server ecosystem API into its core artifact. Exact Bolt and LWC coordinates and compatible versions must be verified from their maintained source repositories before the Gradle dependencies are pinned. Dependencies are never shaded into Kitsune.
+Bolt and other protection or claim plugins integrate by registering `BlockAccessProvider`, normally from a separate bridge plugin. Kitsune does not guess APIs or import every server ecosystem dependency into its core artifact. LWCX coordinates and compatible versions must be verified from its maintained source before the Gradle dependency is pinned. Dependencies are never shaded into Kitsune.
 
 ## Search Pipeline
 
@@ -355,7 +355,7 @@ Run Paper 1.21.4 with Java 21 through the Gradle RunPaper task and exercise:
 5. `--verbose` creates expanded billboards and nested chat trees.
 6. A second player never sees the first player's displays.
 7. Moving/removing an item changes the next search after the dirty-root update.
-8. A stub denial provider, then installed Bolt/LWC adapters in their supported test environments, produce no observable denied result.
+8. A stub denial provider, then the installed LWCX adapter in its supported test environment, produce no observable denied result.
 9. New search, timeout, world change, logout, root invalidation, and plugin shutdown remove all marker entities.
 10. Restart reuses SQLite data only after loaded roots and access are validated.
 
