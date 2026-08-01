@@ -30,6 +30,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
+import java.util.function.Consumer;
 
 public final class ContainerIndex implements AutoCloseable {
     private final ContainerIndexQueue queue;
@@ -42,6 +43,7 @@ public final class ContainerIndex implements AutoCloseable {
     private final LongSupplier currentTick;
     private final int rootsPerTick;
     private final int reconciliationPeriodTicks;
+    private final Consumer<BlockKey> rootInvalidated;
     private final AtomicLong chunkRevision = new AtomicLong();
     private final Map<ChunkKey, Chunk> loadedChunks = new LinkedHashMap<>();
     private final Map<ChunkKey, Set<BlockKey>> rootsByChunk =
@@ -62,7 +64,8 @@ public final class ContainerIndex implements AutoCloseable {
         int chunksPerTick,
         int rootsPerTick,
         int reconciliationPeriodTicks,
-        LongSupplier currentTick
+        LongSupplier currentTick,
+        Consumer<BlockKey> rootInvalidated
     ) {
         if (rootsPerTick <= 0) {
             throw new IllegalArgumentException("Roots per tick must be positive");
@@ -84,6 +87,10 @@ public final class ContainerIndex implements AutoCloseable {
         this.currentTick = Objects.requireNonNull(
             currentTick,
             "Current tick supplier"
+        );
+        this.rootInvalidated = Objects.requireNonNull(
+            rootInvalidated,
+            "Root invalidation callback"
         );
         this.rootsPerTick = rootsPerTick;
         this.reconciliationPeriodTicks = reconciliationPeriodTicks;
@@ -120,7 +127,10 @@ public final class ContainerIndex implements AutoCloseable {
             chunk.getZ()
         );
         loadedChunks.put(key, chunk);
-        rootsByChunk.remove(key);
+        Set<BlockKey> previousRoots = rootsByChunk.remove(key);
+        if (previousRoots != null) {
+            previousRoots.forEach(rootInvalidated);
+        }
         rebuildLoadedRoots();
         rootsByChunk.put(key, new LinkedHashSet<>());
         queue.enqueueChunk(key);
@@ -131,6 +141,7 @@ public final class ContainerIndex implements AutoCloseable {
         loadedChunks.remove(chunk);
         Set<BlockKey> unavailableRoots = rootsByChunk.remove(chunk);
         if (unavailableRoots != null && !unavailableRoots.isEmpty()) {
+            unavailableRoots.forEach(rootInvalidated);
             for (Set<BlockKey> chunkRoots : rootsByChunk.values()) {
                 chunkRoots.removeAll(unavailableRoots);
             }
@@ -150,6 +161,7 @@ public final class ContainerIndex implements AutoCloseable {
     public void markDirty(BlockKey root) {
         Objects.requireNonNull(root, "Root key");
         if (accepting) {
+            rootInvalidated.accept(root);
             tracker.markDirty(root, requireTick(currentTick.getAsLong()));
         }
     }
@@ -230,7 +242,15 @@ public final class ContainerIndex implements AutoCloseable {
                 }
             }
 
-            rootsByChunk.put(chunkWork.key(), resolved);
+            Set<BlockKey> previousRoots = rootsByChunk.put(
+                chunkWork.key(),
+                resolved
+            );
+            if (previousRoots != null) {
+                previousRoots.stream()
+                    .filter(root -> !resolved.contains(root))
+                    .forEach(rootInvalidated);
+            }
             rebuildLoadedRoots();
             for (BlockKey root : discovered) {
                 tracker.markDirty(root, tick);
@@ -399,6 +419,9 @@ public final class ContainerIndex implements AutoCloseable {
                 pending.action() == PendingAction.SNAPSHOT
                 && canonicalRoot != null
             ) {
+                if (!rootWork.key().equals(canonicalRoot)) {
+                    removeLoadedRoot(rootWork.key());
+                }
                 restoreLoadedRoot(canonicalRoot);
             }
             queue.completeRootWrite(rootWork, null);
@@ -441,6 +464,7 @@ public final class ContainerIndex implements AutoCloseable {
             chunkRoots.remove(root);
         }
         rebuildLoadedRoots();
+        rootInvalidated.accept(root);
     }
 
     private void rebuildLoadedRoots() {

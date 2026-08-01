@@ -457,7 +457,7 @@ class SqliteIndexRepositoryTest {
 
                 @Override
                 public int version() {
-                    return 2;
+                    return SparseTagEmbeddingProvider.VERSION + 1;
                 }
 
                 @Override
@@ -478,8 +478,14 @@ class SqliteIndexRepositoryTest {
 
             assertThrows(IllegalStateException.class,
                     () -> fixture.repository().reembedAll(provider));
-            assertEquals(1, countProviderVersion(fixture.connection(), 1));
-            assertEquals(0, countProviderVersion(fixture.connection(), 2));
+            assertEquals(1, countProviderVersion(
+                fixture.connection(),
+                SparseTagEmbeddingProvider.VERSION
+            ));
+            assertEquals(0, countProviderVersion(
+                fixture.connection(),
+                SparseTagEmbeddingProvider.VERSION + 1
+            ));
             assertTrue(fixture.connection().getAutoCommit());
         }
     }
@@ -568,7 +574,13 @@ class SqliteIndexRepositoryTest {
             BlockKey unallowed = fixture.key(1, 64, 0);
             fixture.insertAvailable(allowed, "diamond");
             fixture.insertAvailable(unallowed, "iron");
-            Map<BlockKey, List<IndexedItem>> docs = fixture.repository().loadDocuments(Set.of(allowed), fixture.provider("builtin:sparse-v1", 1));
+            Map<BlockKey, List<IndexedItem>> docs = fixture.repository().loadDocuments(
+                Set.of(allowed),
+                fixture.provider(
+                    SparseTagEmbeddingProvider.ID,
+                    SparseTagEmbeddingProvider.VERSION
+                )
+            );
             assertEquals(1, docs.size());
             assertEquals("diamond", docs.get(allowed).getFirst().descriptor().materialKey());
         }

@@ -1,6 +1,7 @@
 package dev.jlo.kitsune;
 
 import dev.jlo.kitsune.config.ConfigLoader;
+import dev.jlo.kitsune.command.KitsuneCommand;
 import dev.jlo.kitsune.config.KitsuneConfig;
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.embedding.EmbeddingRegistry;
@@ -13,9 +14,21 @@ import dev.jlo.kitsune.index.RootResolver;
 import dev.jlo.kitsune.index.SqliteIndexRepository;
 import dev.jlo.kitsune.item.NestedItemWalker;
 import dev.jlo.kitsune.item.TraversalLimits;
+import dev.jlo.kitsune.protection.ProtectionRegistry;
+import dev.jlo.kitsune.search.BukkitLiveRootAccess;
+import dev.jlo.kitsune.search.BukkitServerThreadBridge;
+import dev.jlo.kitsune.search.SearchPolicy;
+import dev.jlo.kitsune.search.SearchService;
+import dev.jlo.kitsune.session.BukkitSessionScheduler;
+import dev.jlo.kitsune.session.SearchSessionManager;
+import dev.jlo.kitsune.session.SessionListener;
+import dev.jlo.kitsune.ui.ChatTreeRenderer;
+import dev.jlo.kitsune.ui.MarkerRenderer;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.World;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.event.HandlerList;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -23,6 +36,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -39,12 +54,21 @@ public final class KitsunePlugin extends JavaPlugin {
     private IndexWorker indexWorker;
     private IndexListener indexListener;
     private BukkitTask indexTickTask;
+    private SearchSessionManager sessionManager;
+    private SessionListener sessionListener;
+    private KitsuneCommand kitsuneCommand;
 
     private ExecutorService bootstrapExecutor;
     private BootstrapOpen pendingBootstrap;
 
     @Override
     public void onEnable() {
+        if (!setCommandUnavailable("Kitsune is still starting.")) {
+            getLogger().severe("Missing /kitsune command declaration");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         saveDefaultConfig();
 
         final KitsuneConfig loadedConfig;
@@ -177,9 +201,16 @@ public final class KitsunePlugin extends JavaPlugin {
         IndexWorker localWorker = null;
         IndexListener localListener = null;
         BukkitTask localTickTask = null;
+        SearchSessionManager localSessionManager = null;
+        SessionListener localSessionListener = null;
+        KitsuneCommand localCommand = null;
         Throwable failure = null;
 
         try {
+            localSessionManager = new SearchSessionManager(
+                    new BukkitSessionScheduler(this),
+                    Duration.ofSeconds(open.config().markerDurationSeconds())
+            );
             localWorker = new IndexWorker(open.repository());
             RootResolver<Inventory> rootResolver = RootResolver.forServer(getServer());
             TraversalLimits limits = new TraversalLimits(
@@ -203,7 +234,8 @@ public final class KitsunePlugin extends JavaPlugin {
                     open.config().chunksPerTick(),
                     open.config().rootsPerTick(),
                     open.config().reconciliationPeriodTicks(),
-                    Bukkit::getCurrentTick
+                    Bukkit::getCurrentTick,
+                    localSessionManager::invalidateRoot
             );
             localListener = new IndexListener(localIndex);
             getServer().getPluginManager().registerEvents(localListener, this);
@@ -220,14 +252,73 @@ public final class KitsunePlugin extends JavaPlugin {
                 }
             }
 
+            SearchPolicy searchPolicy = new SearchPolicy(
+                    open.config().radius(),
+                    open.config().minimumScore(),
+                    open.config().maxResults(),
+                    open.config().maxPathsPerRoot(),
+                    Duration.ofSeconds(open.config().warmupTimeoutSeconds())
+            );
+            BukkitServerThreadBridge serverThread = new BukkitServerThreadBridge(this);
+            ProtectionRegistry protectionRegistry = new ProtectionRegistry(
+                    getServer().getServicesManager(),
+                    getLogger()
+            );
+            BukkitLiveRootAccess liveRoots = new BukkitLiveRootAccess(
+                    getServer(),
+                    snapshotter,
+                    protectionRegistry
+            );
+            ContainerIndex readyIndex = localIndex;
+            SearchService searchService = new SearchService(
+                    readyIndex::awaitReady,
+                    localWorker,
+                    open.repository(),
+                    open.embeddingProvider(),
+                    serverThread,
+                    liveRoots,
+                    searchPolicy
+            );
+            localSessionListener = new SessionListener(localSessionManager);
+            getServer().getPluginManager().registerEvents(localSessionListener, this);
+            localCommand = new KitsuneCommand(
+                    getServer(),
+                    searchService,
+                    localSessionManager,
+                    serverThread,
+                    liveRoots,
+                    searchPolicy,
+                    new ChatTreeRenderer(),
+                    new MarkerRenderer(this)
+            );
+            PluginCommand pluginCommand = Objects.requireNonNull(
+                    getCommand("kitsune"),
+                    "Missing /kitsune command declaration"
+            );
+            pluginCommand.setExecutor(localCommand);
+
             config = open.config();
             containerIndex = localIndex;
             indexWorker = localWorker;
             indexListener = localListener;
             indexTickTask = localTickTask;
+            sessionManager = localSessionManager;
+            sessionListener = localSessionListener;
+            kitsuneCommand = localCommand;
             getLogger().info("Kitsune enabled");
         } catch (Throwable publishFailure) {
             failure = publishFailure;
+            if (localCommand != null) {
+                localCommand.stop();
+            }
+            if (localSessionManager != null) {
+                localSessionManager.clearAll();
+            }
+            if (localSessionListener != null) {
+                HandlerList.unregisterAll(localSessionListener);
+            }
+            setCommandUnavailable("Kitsune is unavailable.");
+
             if (localTickTask != null) {
                 localTickTask.cancel();
             }
@@ -295,6 +386,17 @@ public final class KitsunePlugin extends JavaPlugin {
         closeUnpublishedRepository(unpublished);
         if (bootstrap != null) bootstrap.shutdownNow();
 
+        if (kitsuneCommand != null) {
+            kitsuneCommand.stop();
+        }
+        setCommandUnavailable("Kitsune is unavailable.");
+        if (sessionManager != null) {
+            sessionManager.clearAll();
+        }
+        if (sessionListener != null) {
+            HandlerList.unregisterAll(sessionListener);
+        }
+
         Throwable failure = null;
 
         if (containerIndex != null) {
@@ -336,8 +438,24 @@ public final class KitsunePlugin extends JavaPlugin {
         indexWorker = null;
         indexListener = null;
         indexTickTask = null;
+        sessionManager = null;
+        sessionListener = null;
+        kitsuneCommand = null;
 
         getLogger().info("Kitsune disabled");
+    }
+
+    private boolean setCommandUnavailable(String message) {
+        PluginCommand command = getCommand("kitsune");
+        if (command == null) {
+            return false;
+        }
+        Component response = Component.text(message);
+        command.setExecutor((sender, ignoredCommand, ignoredLabel, ignoredArguments) -> {
+            sender.sendMessage(response);
+            return true;
+        });
+        return true;
     }
 
     private void closeUnpublishedRepository(BootstrapOpen bootstrap) {

@@ -48,6 +48,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SearchServiceTest {
@@ -73,6 +74,31 @@ class SearchServiceTest {
             assertEquals(1, harness.loadDocumentCalls());
         }
     }
+
+    @Test
+    void noDeniedPathDataLeaksIntoSuccessfulSearchOutcome() throws Exception {
+        RootSeed allowed = seedRoot(1, 64, 0, false, false,
+            scoreMatch("allowed", 0.99, 0));
+        RootSeed denied = seedRoot(2, 64, 0, true, false,
+            scoreMatch("denied-stack", 0.98, 0));
+        SearchPolicy policy = new SearchPolicy(16, 0.80, 10, 4, Duration.ofSeconds(1));
+
+        try (SearchHarness harness = SearchHarness.create(policy, denied, allowed)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(1, outcome.roots().size());
+            RootMatch matched = outcome.roots().getFirst();
+            assertEquals(allowed.identity().key(), matched.key());
+            assertEquals(1, matched.totalMatchingStacks());
+            assertEquals(1, matched.itemMatches().size());
+            assertNotEquals(denied.identity().key(), matched.key());
+            assertEquals("allowed", matched.itemMatches().get(0).path().steps().getFirst().label());
+            assertEquals(0.99, matched.bestScore());
+            assertEquals(Set.of(allowed.identity().key()), harness.loadedDocumentKeys());
+        }
+    }
+
 
     @Test
     void ranksByScoreThenDistanceThenCoordinates() throws Exception {
@@ -182,6 +208,8 @@ class SearchServiceTest {
             assertEquals(SearchOutcome.Status.INDEX_WARMING, outcome.status());
             assertEquals(Set.of(), harness.loadedDocumentKeys());
             assertEquals(1, harness.awaitedChunkRequests().size());
+            assertEquals(0, harness.findCandidateCalls());
+
         }
     }
 
@@ -197,6 +225,7 @@ class SearchServiceTest {
             assertEquals(SearchOutcome.Status.FAILURE, outcome.status());
             assertTrue(harness.awaitedChunkRequests().isEmpty());
             assertEquals(Set.of(), harness.loadedDocumentKeys());
+            assertEquals(0, harness.findCandidateCalls());
         }
     }
 

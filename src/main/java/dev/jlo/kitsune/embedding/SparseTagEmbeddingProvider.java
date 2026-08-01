@@ -9,7 +9,7 @@ import java.util.*;
 
 public class SparseTagEmbeddingProvider implements EmbeddingProvider {
     public static final String ID = "builtin:sparse-v1";
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
 
     @Override
     public String id() { return ID; }

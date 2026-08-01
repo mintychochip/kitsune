@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -83,6 +84,39 @@ class ContainerIndexLoadedRootRestorationTest {
     }
 
     @Test
+    void deleteInvalidatesLoadedRootBeforeRepositoryWork() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.finishInitialIndexing();
+
+            fixture.index.delete(fixture.root);
+
+            assertEquals(List.of(fixture.root), fixture.invalidatedRoots);
+        }
+    }
+
+    @Test
+    void chunkUnloadInvalidatesEveryKnownRootImmediately() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.finishInitialIndexing();
+
+            fixture.index.onChunkUnloaded(fixture.root.chunkKey());
+
+            assertEquals(List.of(fixture.root), fixture.invalidatedRoots);
+        }
+    }
+
+    @Test
+    void dirtyRootInvalidatesItsPublishedMarkersImmediately() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.finishInitialIndexing();
+
+            fixture.index.markDirty(fixture.root);
+
+            assertEquals(List.of(fixture.root), fixture.invalidatedRoots);
+        }
+    }
+
+    @Test
     void unavailableSnapshotPreservesThePersistedRoot() throws Exception {
         BlockKey root = new BlockKey(UUID.randomUUID(), 0, 64, 0);
         AtomicLong currentTick = new AtomicLong();
@@ -98,7 +132,8 @@ class ContainerIndexLoadedRootRestorationTest {
             1,
             1,
             100,
-            currentTick::get
+            currentTick::get,
+            ignored -> {}
         );
 
         try {
@@ -143,6 +178,7 @@ class ContainerIndexLoadedRootRestorationTest {
         BlockKey canonical = new BlockKey(worldId, 0, 64, 0);
         BlockKey requested = new BlockKey(worldId, 0, 64, 1);
         AtomicLong currentTick = new AtomicLong();
+        List<BlockKey> invalidatedRoots = new ArrayList<>();
         BlockingRepository repository = new BlockingRepository();
         IndexWorker worker = new IndexWorker(repository);
         RootResolver<Inventory> resolver = doubleChestResolver(
@@ -158,7 +194,8 @@ class ContainerIndexLoadedRootRestorationTest {
             1,
             1,
             100,
-            currentTick::get
+            currentTick::get,
+            invalidatedRoots::add
         );
 
         try {
@@ -169,9 +206,13 @@ class ContainerIndexLoadedRootRestorationTest {
             index.tick();
             repository.awaitReplacement();
             worker.submit(() -> null).get(5, TimeUnit.SECONDS);
+            invalidatedRoots.clear();
+            currentTick.set(2L);
+            index.tick();
 
             assertEquals(List.of(canonical), repository.replacedRoots());
             assertEquals(List.of(requested), repository.deletedRoots());
+            assertEquals(List.of(requested), invalidatedRoots);
         } finally {
             index.close();
             worker.close();
@@ -184,6 +225,7 @@ class ContainerIndexLoadedRootRestorationTest {
         private final AtomicLong currentTick = new AtomicLong();
         private final BlockingRepository repository = new BlockingRepository();
         private final IndexWorker worker = new IndexWorker(repository);
+        private final List<BlockKey> invalidatedRoots = new ArrayList<>();
         private final ContainerIndex index;
 
         private Fixture() {
@@ -199,7 +241,8 @@ class ContainerIndexLoadedRootRestorationTest {
                 1,
                 1,
                 100,
-                currentTick::get
+                currentTick::get,
+                invalidatedRoots::add
             );
         }
 

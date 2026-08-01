@@ -22,6 +22,19 @@ class SparseTagEmbeddingProviderTest {
         return builder.build();
     }
 
+    private ItemDescriptor realisticMendingPickaxe() {
+        return ItemDescriptor.builder()
+            .materialKey("minecraft:diamond_pickaxe")
+            .amount(1)
+            .addTrait("item")
+            .addTrait("tool:pickaxe")
+            .addEnchantment("minecraft:mending", 1)
+            .addScalarMetadata("material_max_stack_size", "1")
+            .addScalarMetadata("material_max_durability", "1561")
+            .addScalarMetadata("unbreakable", "false")
+            .build();
+    }
+
     @Test
     void semanticMiningQueryRanksPickaxeAboveFood() {
         var pickaxe = descriptor("minecraft:diamond_pickaxe", Set.of("tool", "mining"), Set.of());
@@ -36,6 +49,29 @@ class SparseTagEmbeddingProviderTest {
         var plain = descriptor("minecraft:diamond_pickaxe", Set.of("tool"), Set.of());
         var query = provider.embedQuery("mending");
         assertTrue(query.cosine(provider.embed(enchanted)) > query.cosine(provider.embed(plain)));
+    }
+
+    @Test
+    void defaultThresholdMatchesMaterialTokenInRealisticDescriptor() {
+        double score = provider.embedQuery("diamond").cosine(
+            provider.embed(realisticMendingPickaxe())
+        );
+
+        assertTrue(score >= 0.30, () -> "diamond score was " + score);
+    }
+
+    @Test
+    void defaultThresholdMatchesEnchantmentTokenInRealisticDescriptor() {
+        double score = provider.embedQuery("mending").cosine(
+            provider.embed(realisticMendingPickaxe())
+        );
+
+        assertTrue(score >= 0.30, () -> "mending score was " + score);
+    }
+
+    @Test
+    void semanticVocabularyUsesSecondProviderVersion() {
+        assertEquals(2, provider.version());
     }
 
     @Test
@@ -112,13 +148,21 @@ class SparseTagEmbeddingProviderTest {
 
     @Test
     void cosineRejectsVersionMismatch() {
-        var sparse = SparseEmbedding.of(SparseTagEmbeddingProvider.ID, 2, Map.of("token:a", 1.0));
+        var sparse = SparseEmbedding.of(
+            SparseTagEmbeddingProvider.ID,
+            SparseTagEmbeddingProvider.VERSION + 1,
+            Map.of("token:a", 1.0)
+        );
         assertThrows(IllegalArgumentException.class, () -> provider.embedQuery("test").cosine(sparse));
     }
 
     @Test
     void cosineReturnsZeroForZeroNorm() {
-        var zero = SparseEmbedding.of(SparseTagEmbeddingProvider.ID, 1, Map.of());
+        var zero = SparseEmbedding.of(
+            SparseTagEmbeddingProvider.ID,
+            SparseTagEmbeddingProvider.VERSION,
+            Map.of()
+        );
         assertEquals(0.0, provider.embedQuery("test").cosine(zero));
         assertEquals(0.0, zero.cosine(provider.embedQuery("test")));
     }
@@ -229,7 +273,7 @@ class SparseTagEmbeddingProviderTest {
     void cosineRejectsForeignEmbeddingImplementation() {
         var foreign = new Embedding() {
             @Override public String providerId() { return SparseTagEmbeddingProvider.ID; }
-            @Override public int providerVersion() { return 1; }
+            @Override public int providerVersion() { return SparseTagEmbeddingProvider.VERSION; }
             @Override public double norm() { return 1.0; }
             @Override public byte[] encode() { return new byte[0]; }
             @Override public double cosine(Embedding other) { return 0.0; }

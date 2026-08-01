@@ -8,6 +8,7 @@ public final class FeatureVocabulary {
 
     static {
         Map<String, Set<String>> map = new LinkedHashMap<>();
+        map.put("diamond", Set.of("gem", "gemstone", "precious"));
         map.put("sword", Set.of("weapon", "melee"));
         map.put("axe", Set.of("tool", "weapon", "chopping"));
         map.put("pickaxe", Set.of("tool", "mining"));
@@ -18,6 +19,10 @@ public final class FeatureVocabulary {
         map.put("leggings", Set.of("armor", "legs"));
         map.put("boots", Set.of("armor", "feet"));
         map.put("food", Set.of("edible"));
+        map.put(
+            "mending",
+            Set.of("durability", "repair", "restoration")
+        );
         ALIASES = Collections.unmodifiableMap(map);
     }
 
