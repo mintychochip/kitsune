@@ -6,6 +6,7 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -22,7 +23,8 @@ public final class IndexWorker implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final IndexRepository repository;
     private final Queue<CompletableFuture<?>> submitted = new ConcurrentLinkedQueue<>();
-    private boolean repositoryClosed;
+    private CompletableFuture<Void> closeDone;
+    private boolean repositoryCloseStarted;
 
     public IndexWorker(IndexRepository repository) {
         this.repository = Objects.requireNonNull(repository, "Repository");
@@ -93,15 +95,20 @@ public final class IndexWorker implements AutoCloseable {
             interruption = forced.interruption();
         }
 
-        Exception failure = null;
+        Throwable failure;
         if (terminated) {
-            try {
-                closeRepositoryOnce();
-            } catch (Exception closeFailure) {
-                failure = closeFailure;
-            }
+            CloseResult closeResult = awaitRepositoryClose(
+                startRepositoryClose(),
+                timeout,
+                unit,
+                interruption
+            );
+            failure = closeResult.failure();
+            interruption = closeResult.interruption();
         } else {
-            failure = new IllegalStateException("Index worker did not terminate");
+            failure = new IllegalStateException(
+                "Index worker did not terminate"
+            );
         }
 
         if (interruption != null) {
@@ -111,8 +118,72 @@ public final class IndexWorker implements AutoCloseable {
             Thread.currentThread().interrupt();
             throw interruption;
         }
+        if (failure instanceof Exception exception) {
+            throw exception;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
         if (failure != null) {
-            throw failure;
+            throw new IllegalStateException(
+                "Repository close failed",
+                failure
+            );
+        }
+    }
+
+    private synchronized CompletableFuture<Void> startRepositoryClose() {
+        if (closeDone == null) {
+            closeDone = new CompletableFuture<>();
+        }
+        if (repositoryCloseStarted) return closeDone;
+        repositoryCloseStarted = true;
+
+        Thread.ofPlatform().name("kitsune-index").start(() -> {
+            try {
+                repository.close();
+                closeDone.complete(null);
+            } catch (Throwable failure) {
+                closeDone.completeExceptionally(failure);
+            }
+        });
+        return closeDone;
+    }
+
+    private static CloseResult awaitRepositoryClose(
+        CompletableFuture<Void> close,
+        long timeout,
+        TimeUnit unit,
+        InterruptedException priorInterruption
+    ) {
+        long remainingNanos = unit.toNanos(timeout);
+        long deadline = System.nanoTime() + remainingNanos;
+        InterruptedException interruption = priorInterruption;
+
+        while (true) {
+            if (remainingNanos <= 0L && !close.isDone()) {
+                return new CloseResult(
+                    new java.util.concurrent.TimeoutException(
+                        "Repository close timed out"
+                    ),
+                    interruption
+                );
+            }
+            try {
+                close.get(Math.max(0L, remainingNanos), TimeUnit.NANOSECONDS);
+                return new CloseResult(null, interruption);
+            } catch (InterruptedException interrupted) {
+                if (interruption == null) {
+                    interruption = interrupted;
+                } else {
+                    interruption.addSuppressed(interrupted);
+                }
+            } catch (ExecutionException failed) {
+                return new CloseResult(failed.getCause(), interruption);
+            } catch (java.util.concurrent.TimeoutException timedOut) {
+                return new CloseResult(timedOut, interruption);
+            }
+            remainingNanos = deadline - System.nanoTime();
         }
     }
 
@@ -150,13 +221,10 @@ public final class IndexWorker implements AutoCloseable {
         }
     }
 
-    private synchronized void closeRepositoryOnce() throws Exception {
-        if (repositoryClosed) {
-            return;
-        }
-        repository.close();
-        repositoryClosed = true;
-    }
+    private record CloseResult(
+        Throwable failure,
+        InterruptedException interruption
+    ) {}
 
     private record AwaitResult(
             boolean terminated, InterruptedException interruption) {}

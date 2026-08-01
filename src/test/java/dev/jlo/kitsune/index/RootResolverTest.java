@@ -8,8 +8,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,6 +85,31 @@ class RootResolverTest {
         assertNull(resolution.key());
         assertNull(resolution.blockType());
         assertNull(resolution.logicalInventory());
+    }
+
+    @Test
+    void unavailableRootIsNotInspectedOrReportedMissing() {
+        BlockKey root = key(2, 64, 1);
+        AtomicBoolean inspected = new AtomicBoolean();
+        RootResolver<String> resolver = new RootResolver<>(
+            new RootResolver.LiveAccess<>() {
+                @Override
+                public boolean isAvailable(BlockKey key) {
+                    return false;
+                }
+
+                @Override
+                public RootResolver.RootProbe<String> inspect(BlockKey key) {
+                    inspected.set(true);
+                    return null;
+                }
+            }
+        );
+
+        RootResolver.Resolution<String> resolution = resolver.resolve(root);
+
+        assertEquals(RootResolver.Status.UNAVAILABLE, resolution.status());
+        assertFalse(inspected.get());
     }
 
     @Test

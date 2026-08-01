@@ -37,11 +37,20 @@ final class ContainerIndexQueue {
         }
     }
 
-    record RootWork(BlockKey key, long operation) {
+    record RootWork(
+        BlockKey key,
+        long operation,
+        long revision,
+        PendingAction action
+    ) {
         RootWork {
             Objects.requireNonNull(key, "Root key must not be null");
+            Objects.requireNonNull(action, "Pending action must not be null");
             if (operation <= 0) {
                 throw new IllegalArgumentException("Root operation must be positive");
+            }
+            if (revision <= 0) {
+                throw new IllegalArgumentException("Root revision must be positive");
             }
         }
     }
@@ -84,6 +93,7 @@ final class ContainerIndexQueue {
         new LinkedHashSet<>();
     private long nextGeneration;
     private long nextRootOperation;
+    private boolean accepting = true;
 
     ContainerIndexQueue(int chunksPerTick, int rootsPerTick) {
         this(chunksPerTick, rootsPerTick, DEFAULT_TIMEOUT_SCHEDULER);
@@ -108,8 +118,22 @@ final class ContainerIndexQueue {
         );
     }
 
+    synchronized void stopAccepting() {
+        if (!accepting) return;
+        accepting = false;
+        IllegalStateException failure = new IllegalStateException(
+            "Container index queue is stopped"
+        );
+        for (ReadinessWaiter waiter : List.copyOf(readinessWaiters)) {
+            failWaiter(waiter, failure);
+        }
+    }
+
     synchronized long enqueueChunk(ChunkKey key) {
         Objects.requireNonNull(key, "Chunk key must not be null");
+        if (!accepting) {
+            return 0L;
+        }
         ChunkGeneration previous = currentChunks.get(key);
         if (previous != null) {
             failGeneration(
@@ -130,13 +154,58 @@ final class ContainerIndexQueue {
 
     synchronized void markDirty(BlockKey key) {
         Objects.requireNonNull(key, "Root key must not be null");
+        if (!accepting) return;
         RootState state = roots.computeIfAbsent(key, RootState::new);
+        state.latestPending = new PendingRoot(key, 1L, PendingAction.SNAPSHOT);
         if (state.inFlight != null) {
             state.rerunRequested = true;
             return;
         }
         state.dirtyRequested = true;
         queueRoot(state);
+    }
+
+    synchronized void markRoot(PendingRoot pending) {
+        Objects.requireNonNull(pending, "Pending root must not be null");
+        if (!accepting) return;
+        RootState state = roots.computeIfAbsent(pending.key(), RootState::new);
+        if (state.parkedPending != null) {
+            if (state.parkedGenerations != null) {
+                state.waitingGenerations.addAll(state.parkedGenerations);
+            }
+            state.parkedPending = null;
+            state.parkedGenerations = null;
+        }
+        state.latestPending = pending;
+        if (state.inFlight != null) {
+            state.rerunRequested = true;
+            return;
+        }
+        state.dirtyRequested = true;
+        queueRoot(state);
+    }
+
+    synchronized void retryRootWrite(RootWork work) {
+        Objects.requireNonNull(work, "Root work must not be null");
+        RootOperation operation = rootOperations.remove(work.operation());
+        if (operation == null || !operation.key.equals(work.key())) return;
+        RootState state = roots.get(operation.key);
+        if (state == null || state.inFlight != operation) return;
+
+        boolean replacementPending = state.rerunRequested
+            && !Objects.equals(state.latestPending, operation.pendingRoot);
+        state.inFlight = null;
+        if (replacementPending) {
+            state.waitingGenerations.addAll(operation.generations);
+            state.rerunRequested = false;
+            state.dirtyRequested = true;
+            queueRoot(state);
+            return;
+        }
+
+        state.parkedPending = operation.pendingRoot;
+        state.parkedGenerations = new LinkedHashSet<>(operation.generations);
+        state.rerunRequested = false;
     }
 
     synchronized TickBatch claimTick() {
@@ -168,13 +237,20 @@ final class ContainerIndexQueue {
                 operationId,
                 state.key,
                 nextGeneration,
-                state.waitingGenerations
+                state.waitingGenerations,
+                state.latestPending
             );
             state.waitingGenerations.clear();
             state.dirtyRequested = false;
             state.inFlight = operation;
             rootOperations.put(operation.id, operation);
-            rootWork.add(new RootWork(operation.key, operation.id));
+            PendingRoot latestPending = state.latestPending;
+            rootWork.add(new RootWork(
+                operation.key,
+                operation.id,
+                latestPending != null ? latestPending.revision() : 1L,
+                latestPending != null ? latestPending.action() : PendingAction.SNAPSHOT
+            ));
         }
 
         return new TickBatch(chunkWork, rootWork);
@@ -189,6 +265,7 @@ final class ContainerIndexQueue {
             discoveredRoots,
             "Discovered roots must not be null"
         );
+        if (!accepting) return;
         ChunkGeneration generation = activeGeneration(work);
         if (generation == null || generation.discovered) return;
         generation.discovered = true;
@@ -270,6 +347,11 @@ final class ContainerIndexQueue {
         }
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("Timeout must be positive");
+        }
+        if (!accepting) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("Container index queue is stopped")
+            );
         }
 
         LinkedHashSet<GenerationTarget> targets = new LinkedHashSet<>();
@@ -385,11 +467,19 @@ final class ContainerIndexQueue {
             RootState state = roots.get(key);
             if (state == null) continue;
             state.waitingGenerations.remove(generation.id);
+            if (state.parkedGenerations != null) {
+                state.parkedGenerations.remove(generation.id);
+                if (state.parkedGenerations.isEmpty()) {
+                    state.parkedGenerations = null;
+                    state.parkedPending = null;
+                }
+            }
             if (state.inFlight != null) {
                 state.inFlight.generations.remove(generation.id);
             }
             if (state.inFlight == null
                 && state.waitingGenerations.isEmpty()
+                && state.parkedGenerations == null
                 && !state.dirtyRequested) {
                 if (state.queued) rootQueue.remove(state);
                 state.queued = false;
@@ -499,6 +589,9 @@ final class ContainerIndexQueue {
         private boolean queued;
         private boolean dirtyRequested;
         private boolean rerunRequested;
+        private PendingRoot latestPending;
+        private PendingRoot parkedPending;
+        private Set<Long> parkedGenerations;
 
         private RootState(BlockKey key) {
             this.key = key;
@@ -510,17 +603,20 @@ final class ContainerIndexQueue {
         private final BlockKey key;
         private final long generationCeiling;
         private final Set<Long> generations;
+        private final PendingRoot pendingRoot;
 
         private RootOperation(
             long id,
             BlockKey key,
             long generationCeiling,
-            Set<Long> generations
+            Set<Long> generations,
+            PendingRoot pendingRoot
         ) {
             this.id = id;
             this.key = key;
             this.generationCeiling = generationCeiling;
             this.generations = new LinkedHashSet<>(generations);
+            this.pendingRoot = pendingRoot;
         }
     }
 

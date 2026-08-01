@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -159,6 +161,78 @@ class IndexWorkerTest {
     }
 
     @Test
+    void closesRepositoryOnLifecycleThreadNotCaller() throws Exception {
+        AtomicBoolean operationStopped = new AtomicBoolean();
+        RecordingRepository repository = new RecordingRepository(operationStopped);
+        AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+
+        try (IndexWorker worker = new IndexWorker(repository)) {
+            CompletableFuture<Void> pending = worker.submit(() -> {
+                operationStopped.set(true);
+                return null;
+            });
+
+            Thread closer = Thread.ofPlatform().start(() -> {
+                try {
+                    worker.close(5, TimeUnit.SECONDS);
+                } catch (Throwable failure) {
+                    closeFailure.set(failure);
+                }
+            });
+            closer.join(TimeUnit.SECONDS.toMillis(5));
+
+            assertTrue(pending.isDone());
+            assertFalse(closer.isAlive());
+            assertNull(closeFailure.get());
+        }
+
+        assertTrue(repository.closeSawStopped());
+        assertNotEquals(Thread.currentThread().getName(), repository.closeThreadName());
+        assertEquals("kitsune-index", repository.closeThreadName());
+        assertEquals(1, repository.closeCount());
+    }
+
+    @Test
+    void forcedCloseStillRunsRepositoryCloseOnLifecycleThread() throws Exception {
+        AtomicBoolean operationStopped = new AtomicBoolean();
+        RecordingRepository repository = new RecordingRepository(operationStopped);
+        AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+        CountDownLatch running = new CountDownLatch(1);
+
+        IndexWorker worker = new IndexWorker(repository);
+        CompletableFuture<Void> active = worker.submit(() -> {
+            running.countDown();
+            try {
+                TimeUnit.SECONDS.sleep(5);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            } finally {
+                operationStopped.set(true);
+            }
+            return null;
+        });
+        assertTrue(running.await(5, TimeUnit.SECONDS));
+
+        Thread closer = Thread.ofPlatform().start(() -> {
+            try {
+                worker.close(100, TimeUnit.MILLISECONDS);
+            } catch (Throwable failure) {
+                closeFailure.set(failure);
+            }
+        });
+        closer.join(TimeUnit.SECONDS.toMillis(5));
+
+        assertTrue(active.isDone());
+        assertFalse(closer.isAlive());
+        assertNull(closeFailure.get());
+
+        assertTrue(repository.closeSawStopped());
+        assertNotEquals(Thread.currentThread().getName(), repository.closeThreadName());
+        assertEquals("kitsune-index", repository.closeThreadName());
+        assertEquals(1, repository.closeCount());
+    }
+
+    @Test
     void nonTerminatingOperationKeepsRepositoryOpenAndLaterCloseRetries() throws Exception {
         AtomicBoolean operationStopped = new AtomicBoolean();
         RecordingRepository repository = new RecordingRepository(operationStopped);
@@ -205,6 +279,7 @@ class IndexWorkerTest {
         private final AtomicBoolean operationStopped;
         private final AtomicInteger closeCount = new AtomicInteger();
         private final AtomicBoolean closeSawStopped = new AtomicBoolean();
+        private String closeThreadName;
 
         private RecordingRepository(AtomicBoolean operationStopped) {
             this.operationStopped = operationStopped;
@@ -216,6 +291,10 @@ class IndexWorkerTest {
 
         boolean closeSawStopped() {
             return closeSawStopped.get();
+        }
+
+        String closeThreadName() {
+            return closeThreadName;
         }
 
         @Override
@@ -251,6 +330,7 @@ class IndexWorkerTest {
         @Override
         public void close() throws SQLException {
             closeSawStopped.set(operationStopped.get());
+            closeThreadName = Thread.currentThread().getName();
             closeCount.incrementAndGet();
         }
     }

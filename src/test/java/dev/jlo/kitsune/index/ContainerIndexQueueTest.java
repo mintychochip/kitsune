@@ -235,6 +235,132 @@ class ContainerIndexQueueTest {
     }
 
     @Test
+    void retryRootWriteWaitsForTrackerAndPreservesReadiness() {
+        ContainerIndexQueue queue = queue(2, 8);
+        ChunkKey chunk = chunk(0);
+        BlockKey root = root(0);
+        PendingRoot pending = new PendingRoot(root, 5L, PendingAction.SNAPSHOT);
+        queue.enqueueChunk(chunk);
+        ContainerIndexQueue.ChunkWork discovery =
+            queue.claimTick().chunks().getFirst();
+        queue.discovered(discovery, List.of(root));
+        queue.markRoot(pending);
+        ContainerIndexQueue.RootWork failed =
+            queue.claimTick().roots().getFirst();
+        queue.completeChunkWrite(discovery, null);
+        CompletableFuture<Void> ready = queue.awaitReady(
+            Set.of(chunk),
+            Duration.ofSeconds(3)
+        ).toCompletableFuture();
+
+        queue.retryRootWrite(failed);
+
+        assertTrue(queue.claimTick().roots().isEmpty());
+        assertFalse(ready.isDone());
+
+        queue.markRoot(pending);
+        ContainerIndexQueue.RootWork retry =
+            queue.claimTick().roots().getFirst();
+        assertEquals(5L, retry.revision());
+        assertEquals(PendingAction.SNAPSHOT, retry.action());
+        queue.completeRootWrite(retry, null);
+
+        ready.join();
+        assertTrue(queue.isReady(chunk));
+    }
+
+    @Test
+    void newerPendingRootReusesParkedGenerationWaiters() {
+        ContainerIndexQueue queue = queue(2, 8);
+        ChunkKey chunk = chunk(0);
+        BlockKey root = root(0);
+        queue.enqueueChunk(chunk);
+        ContainerIndexQueue.ChunkWork discovery =
+            queue.claimTick().chunks().getFirst();
+        queue.discovered(discovery, List.of(root));
+        queue.markRoot(new PendingRoot(root, 5L, PendingAction.SNAPSHOT));
+        ContainerIndexQueue.RootWork failed =
+            queue.claimTick().roots().getFirst();
+        queue.completeChunkWrite(discovery, null);
+        CompletableFuture<Void> ready = queue.awaitReady(
+            Set.of(chunk),
+            Duration.ofSeconds(3)
+        ).toCompletableFuture();
+        queue.retryRootWrite(failed);
+
+        queue.markRoot(new PendingRoot(root, 6L, PendingAction.SNAPSHOT));
+        ContainerIndexQueue.RootWork replacement =
+            queue.claimTick().roots().getFirst();
+        assertEquals(6L, replacement.revision());
+        queue.completeRootWrite(replacement, null);
+
+        ready.join();
+        assertTrue(queue.isReady(chunk));
+    }
+
+    @Test
+    void newerPendingRootSurvivesFailureWhileWriteIsInFlight() {
+        ContainerIndexQueue queue = queue(2, 8);
+        ChunkKey chunk = chunk(0);
+        BlockKey root = root(0);
+        queue.enqueueChunk(chunk);
+        ContainerIndexQueue.ChunkWork discovery =
+            queue.claimTick().chunks().getFirst();
+        queue.discovered(discovery, List.of(root));
+        queue.markRoot(new PendingRoot(root, 5L, PendingAction.SNAPSHOT));
+        ContainerIndexQueue.RootWork failed =
+            queue.claimTick().roots().getFirst();
+        queue.completeChunkWrite(discovery, null);
+        CompletableFuture<Void> ready = queue.awaitReady(
+            Set.of(chunk),
+            Duration.ofSeconds(3)
+        ).toCompletableFuture();
+
+        queue.markRoot(new PendingRoot(root, 6L, PendingAction.DELETE));
+        queue.retryRootWrite(failed);
+
+        ContainerIndexQueue.RootWork replacement =
+            queue.claimTick().roots().getFirst();
+        assertEquals(6L, replacement.revision());
+        assertEquals(PendingAction.DELETE, replacement.action());
+        queue.completeRootWrite(replacement, null);
+        ready.join();
+        assertTrue(queue.isReady(chunk));
+    }
+
+    @Test
+    void stopAcceptingFailsExistingAndFutureReadinessRequests() {
+        ContainerIndexQueue queue = queue(2, 8);
+        CompletableFuture<Void> existing = queue.awaitReady(
+            Set.of(chunk(0)),
+            Duration.ofSeconds(3)
+        ).toCompletableFuture();
+
+        queue.stopAccepting();
+
+        CompletionException existingFailure = assertThrows(
+            CompletionException.class,
+            existing::join
+        );
+        assertInstanceOf(
+            IllegalStateException.class,
+            existingFailure.getCause()
+        );
+        CompletableFuture<Void> future = queue.awaitReady(
+            Set.of(chunk(1)),
+            Duration.ofSeconds(3)
+        ).toCompletableFuture();
+        CompletionException futureFailure = assertThrows(
+            CompletionException.class,
+            future::join
+        );
+        assertInstanceOf(
+            IllegalStateException.class,
+            futureFailure.getCause()
+        );
+    }
+
+    @Test
     void unloadInvalidatesReadinessWithoutDeletingQueuedRoots() {
         ContainerIndexQueue queue = queue(2, 8);
         ChunkKey chunk = chunk(0);

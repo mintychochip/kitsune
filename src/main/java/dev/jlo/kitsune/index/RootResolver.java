@@ -41,6 +41,10 @@ public final class RootResolver<T> {
     }
 
     public interface LiveAccess<T> {
+        default boolean isAvailable(BlockKey key) {
+            return true;
+        }
+
         RootProbe<T> inspect(BlockKey key);
     }
 
@@ -95,6 +99,10 @@ public final class RootResolver<T> {
 
     public Resolution<T> resolve(BlockKey key) {
         Objects.requireNonNull(key, "Key must not be null");
+
+        if (!liveAccess.isAvailable(key)) {
+            return Resolution.unavailable();
+        }
 
         RootProbe<T> probe = liveAccess.inspect(key);
         if (probe == null) {
@@ -215,6 +223,16 @@ public final class RootResolver<T> {
 
         private PaperLiveAccess(Server server) {
             this.server = server;
+        }
+
+        @Override
+        public boolean isAvailable(BlockKey key) {
+            World world = server.getWorld(key.worldId());
+            if (world == null) return false;
+            return world.isChunkLoaded(
+                Math.floorDiv(key.x(), 16),
+                Math.floorDiv(key.z(), 16)
+            );
         }
 
         @Override
