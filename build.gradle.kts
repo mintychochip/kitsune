@@ -10,14 +10,17 @@ version = providers.gradleProperty("version").get()
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://repo.codemc.io/repository/maven-releases/")
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    compileOnly("com.griefcraft:lwc:2.4.2")
     implementation("org.xerial:sqlite-jdbc:3.53.2.1")
 
     testCompileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
     testRuntimeOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    testImplementation("com.griefcraft:lwc:2.4.2")
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

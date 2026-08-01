@@ -1,5 +1,6 @@
 package dev.jlo.kitsune;
 
+import dev.jlo.kitsune.api.protection.BlockAccessProvider;
 import dev.jlo.kitsune.config.ConfigLoader;
 import dev.jlo.kitsune.command.KitsuneCommand;
 import dev.jlo.kitsune.config.KitsuneConfig;
@@ -14,6 +15,7 @@ import dev.jlo.kitsune.index.RootResolver;
 import dev.jlo.kitsune.index.SqliteIndexRepository;
 import dev.jlo.kitsune.item.NestedItemWalker;
 import dev.jlo.kitsune.item.TraversalLimits;
+import dev.jlo.kitsune.protection.LwcProtectionProvider;
 import dev.jlo.kitsune.protection.ProtectionRegistry;
 import dev.jlo.kitsune.search.BukkitLiveRootAccess;
 import dev.jlo.kitsune.search.BukkitServerThreadBridge;
@@ -32,6 +34,8 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.event.HandlerList;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -47,6 +51,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 public final class KitsunePlugin extends JavaPlugin {
+    private static final String LWC_INCOMPATIBILITY_MESSAGE =
+            "LWC is enabled but its 2.4.2 API is incompatible; Kitsune search is disabled.";
     private final BootstrapLifecycle bootstrapLifecycle = new BootstrapLifecycle();
 
     private KitsuneConfig config;
@@ -57,6 +63,7 @@ public final class KitsunePlugin extends JavaPlugin {
     private SearchSessionManager sessionManager;
     private SessionListener sessionListener;
     private KitsuneCommand kitsuneCommand;
+    private BlockAccessProvider lwcProtectionProvider;
 
     private ExecutorService bootstrapExecutor;
     private BootstrapOpen pendingBootstrap;
@@ -85,6 +92,18 @@ public final class KitsunePlugin extends JavaPlugin {
             getLogger().log(
                     Level.SEVERE,
                     "Failed to initialize indexing lifecycle",
+                    failure
+            );
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        try {
+            registerLwcIntegrationIfEnabled();
+        } catch (Throwable failure) {
+            getLogger().log(
+                    Level.SEVERE,
+                    LWC_INCOMPATIBILITY_MESSAGE,
                     failure
             );
             getServer().getPluginManager().disablePlugin(this);
@@ -386,6 +405,8 @@ public final class KitsunePlugin extends JavaPlugin {
         closeUnpublishedRepository(unpublished);
         if (bootstrap != null) bootstrap.shutdownNow();
 
+        Throwable failure = null;
+
         if (kitsuneCommand != null) {
             kitsuneCommand.stop();
         }
@@ -397,7 +418,18 @@ public final class KitsunePlugin extends JavaPlugin {
             HandlerList.unregisterAll(sessionListener);
         }
 
-        Throwable failure = null;
+        BlockAccessProvider registeredLwcProvider = lwcProtectionProvider;
+        lwcProtectionProvider = null;
+        if (registeredLwcProvider != null) {
+            try {
+                getServer().getServicesManager().unregister(
+                        BlockAccessProvider.class,
+                        registeredLwcProvider
+                );
+            } catch (Throwable unregisterFailure) {
+                failure = appendFailure(failure, unregisterFailure);
+            }
+        }
 
         if (containerIndex != null) {
             containerIndex.stopAccepting();
@@ -443,6 +475,40 @@ public final class KitsunePlugin extends JavaPlugin {
         kitsuneCommand = null;
 
         getLogger().info("Kitsune disabled");
+    }
+
+    private void registerLwcIntegrationIfEnabled() {
+        Plugin lwcPlugin = getServer().getPluginManager().getPlugin("LWC");
+        if (lwcPlugin == null || !lwcPlugin.isEnabled()) {
+            return;
+        }
+
+        BlockAccessProvider provider = null;
+        try {
+            provider = new LwcProtectionProvider();
+            getServer().getServicesManager().register(
+                    BlockAccessProvider.class,
+                    provider,
+                    this,
+                    ServicePriority.Normal
+            );
+            lwcProtectionProvider = provider;
+        } catch (Throwable failure) {
+            if (provider != null) {
+                try {
+                    getServer().getServicesManager().unregister(
+                            BlockAccessProvider.class,
+                            provider
+                    );
+                } catch (Throwable unregisterFailure) {
+                    failure.addSuppressed(unregisterFailure);
+                }
+            }
+            throw new IllegalStateException(
+                    LWC_INCOMPATIBILITY_MESSAGE,
+                    failure
+            );
+        }
     }
 
     private boolean setCommandUnavailable(String message) {
