@@ -108,7 +108,7 @@ with:
 .filter { it.extension == "jar" && !it.name.startsWith("api-") }
 ```
 
-Keep the existing `from(zipTree(it))` call unchanged. This includes SQLite plus Jackson databind/core/annotations while avoiding duplicate API classes that are already copied from `:api`.
+Before the `dependsOn` line in each `tasks.jar` block, set `duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.EXCLUDE`; unpacking multiple runtime jars otherwise fails on shared license/notice entries. Keep the existing `from(zipTree(it))` call unchanged. This includes SQLite plus Jackson databind/core/annotations while avoiding duplicate API classes that are already copied from `:api`.
 
 - [ ] **Step 2: Run the packaging contract**
 
