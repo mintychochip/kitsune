@@ -38,12 +38,12 @@ Current common candidates to move to `common` unchanged or with neutral port inj
 
 - `config/KitsuneConfig.java` and neutral configuration validation
 - `embedding/*.java`
-- `index/*.java` except `IndexListener.java`, `ContainerSnapshotter.java`, `RootResolver.java`, and platform event/access classes identified in Task 3
+- `index/*.java` except `ContainerIndex.java`, `IndexListener.java`, `ContainerSnapshotter.java`, and platform event/access classes identified in Task 3
 - `item/NestedItemWalker.java`, `item/TraversalAdapter.java`, `item/TraversalChild.java`, `item/NestedItemWalkResult.java`, `item/TraversalLimits.java`, `item/ItemFeatureRegistry.java` after neutralizing its provider registry
-- `search/IndexReadiness.java`, `ItemMatch.java`, `LiveRootAccess.java`, `RootMatch.java`, `SearchContext.java`, `SearchGuard.java`, `SearchOutcome.java`, `SearchPolicy.java`, `SearchService.java`, `ServerThreadBridge.java`, `AllowedRoot.java`
+- `search/IndexReadiness.java`, `ItemMatch.java`, `LiveRootAccess.java`, `RootMatch.java`, `SearchContext.java`, `SearchGuard.java`, `SearchOutcome.java`, `SearchPolicy.java`, `SearchService.java`, `ServerThreadBridge.java`, `AllowedRoot.java`, and neutral `RootResolver.java`
 - `session/SearchSessionManager.java`, `SearchToken.java`, `SessionScheduler.java`, `SessionTask.java`; `SessionListener.java` remains platform-specific
 - `command/SearchRequest.java` and the neutral command/service coordinator extracted from `KitsuneCommand.java`
-- Existing index, search, config, embedding, item, session, command, protection, and model tests after ownership is split.
+- `ui/RenderedMarker.java` and corresponding session marker tests
 
 Current platform-specific candidates:
 
@@ -56,7 +56,7 @@ Current platform-specific candidates:
 - `protection/LwcProtectionProvider.java`, `protection/ProtectionRegistry.java` native registration portions
 - `config/ConfigLoader.java`
 - `session/SessionListener.java`
-- `index/IndexListener.java`, `index/ContainerSnapshotter.java`, `index/RootResolver.java`, and their Paper-specific portions.
+- `index/ContainerIndex.java`, `IndexListener.java`, and `ContainerSnapshotter.java`, plus their Paper-specific portions.
 
 ---
 
@@ -220,12 +220,13 @@ git commit -m "Expose platform-neutral Kitsune API"
 ## Task 3: Move the common engine behind neutral ports
 
 **Files:**
-- Move: `src/main/java/dev/jlo/kitsune/config/KitsuneConfig.java`, `embedding`, `index/*.java` except `IndexListener.java`, `ContainerSnapshotter.java`, and `RootResolver.java`, `search`, `session`, and neutral `command`/`item`/`protection` files -> `common/src/main/java/dev/jlo/kitsune/`
+- Move: `src/main/java/dev/jlo/kitsune/config/KitsuneConfig.java`, `embedding`, `index/*.java` except `ContainerIndex.java`, `IndexListener.java`, and `ContainerSnapshotter.java`, `search`, `session`, neutral `ui/RenderedMarker.java`, and neutral `command`/`item`/`protection` files -> `common/src/main/java/dev/jlo/kitsune/`
 - Move: corresponding tests under `src/test/java/dev/jlo/kitsune/` -> `common/src/test/java/dev/jlo/kitsune/`
 - Create: `common/src/main/java/dev/jlo/kitsune/runtime/PlatformRuntime.java`
 - Create: `common/src/main/java/dev/jlo/kitsune/runtime/PlatformCapabilities.java`
 - Create: `common/src/main/java/dev/jlo/kitsune/runtime/ChangeListener.java`
 - Create: `common/src/main/java/dev/jlo/kitsune/command/SearchCommandHandler.java`
+- Modify: `common/src/main/java/dev/jlo/kitsune/index/RootResolver.java` to remove the native factory and retain generic resolution logic
 - Modify: `common/src/main/java/dev/jlo/kitsune/search/LiveRootAccess.java`
 - Modify: `common/src/main/java/dev/jlo/kitsune/item/ItemFeatureRegistry.java`
 - Modify: `common/src/main/java/dev/jlo/kitsune/protection/ProtectionRegistry.java`
@@ -309,7 +310,8 @@ git commit -m "Extract platform-independent Kitsune engine"
 - Move/adapt: `src/main/java/dev/jlo/kitsune/session/BukkitSessionScheduler.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/session/`
 - Move/adapt: `src/main/java/dev/jlo/kitsune/session/SessionListener.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/session/BukkitSessionListener.java`
 - Move/adapt: `src/main/java/dev/jlo/kitsune/config/ConfigLoader.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/config/BukkitConfigLoader.java`
-- Move/adapt: `src/main/java/dev/jlo/kitsune/index/ContainerSnapshotter.java` and `RootResolver.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/index/`; isolate Paper-only live access in `paper`
+- Move/adapt: `src/main/java/dev/jlo/kitsune/index/ContainerIndex.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/index/BukkitContainerIndex.java`
+- Move/adapt: `src/main/java/dev/jlo/kitsune/index/ContainerSnapshotter.java` -> `platform/bukkit/src/main/java/dev/jlo/kitsune/bukkit/index/`; create `BukkitRootResolver.java` for the native live-access factory
 - Create: `paper/src/main/java/dev/jlo/kitsune/paper/PaperPlugin.java`
 - Create: `spigot/src/main/java/dev/jlo/kitsune/spigot/SpigotPlugin.java`
 - Create: `paper/src/main/java/dev/jlo/kitsune/paper/PaperCapabilities.java`
