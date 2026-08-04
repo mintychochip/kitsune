@@ -23,6 +23,8 @@ final class PlatformNeutralApiTest {
         "dev.jlo.kitsune.model.RootIdentity",
         "dev.jlo.kitsune.api.embedding.Embedding",
         "dev.jlo.kitsune.api.embedding.EmbeddingProvider",
+        "dev.jlo.kitsune.api.embedding.EmbeddingCredentialResolver",
+        "dev.jlo.kitsune.api.embedding.EmbeddingProviderFactory",
         "dev.jlo.kitsune.api.item.ItemFeatureProvider",
         "dev.jlo.kitsune.api.item.NestedContentsProvider",
         "dev.jlo.kitsune.api.protection.AccessContext",
