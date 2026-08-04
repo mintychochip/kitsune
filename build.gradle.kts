@@ -62,6 +62,14 @@ subprojects {
                             artifact(mainArtifact)
                             artifact(tasks.getByName("sourcesJar"))
                             artifact(tasks.getByName("javadocJar"))
+                            tasks.matching { task ->
+                                task.name.startsWith("publishMavenJavaPublicationTo")
+                            }.configureEach {
+                                dependsOn(mainArtifact)
+                                if (project.path == ":paper" || project.path == ":spigot") {
+                                    dependsOn(tasks.getByName("jar"))
+                                }
+                            }
                         }
                         pom {
                             name.set("Kitsune ${project.path.removePrefix(":").replaceFirstChar { it.uppercase() }}")
