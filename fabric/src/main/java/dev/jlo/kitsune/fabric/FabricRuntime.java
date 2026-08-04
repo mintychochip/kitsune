@@ -253,11 +253,17 @@ public final class FabricRuntime implements AutoCloseable {
             for (Map.Entry<BlockKey, ChunkKey> entry : previous.entrySet()) {
                 if (!byKey.containsKey(entry.getKey())) repository.deleteRoot(entry.getKey());
             }
-            if (!current.isEmpty() || !previous.isEmpty()) indexReady.complete(null);
+            if (scanIsReady(current, previous)) indexReady.complete(null);
             return null;
         }).whenComplete((ignored, failure) -> {
             if (failure != null && !indexReady.isDone()) indexReady.completeExceptionally(unwrap(failure));
         });
+    }
+
+    static boolean scanIsReady(List<?> current, Map<?, ?> previous) {
+        Objects.requireNonNull(current, "Current scan must not be null");
+        Objects.requireNonNull(previous, "Previous index state must not be null");
+        return true;
     }
 
     private void sendResult(

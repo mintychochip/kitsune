@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FabricAdapterContractTest {
     @Test
@@ -25,5 +28,10 @@ class FabricAdapterContractTest {
 
         assertEquals(32, config.radius());
         assertEquals("builtin:sparse-v1", config.embeddingProvider());
+    }
+
+    @Test
+    void emptySuccessfulScanIsReady() {
+        assertTrue(FabricRuntime.scanIsReady(List.of(), Map.of()));
     }
 }
