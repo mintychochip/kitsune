@@ -16,7 +16,6 @@ import dev.jlo.kitsune.index.IndexWorker;
 import dev.jlo.kitsune.item.NestedItemWalker;
 import dev.jlo.kitsune.item.TraversalLimits;
 import dev.jlo.kitsune.protection.ProtectionRegistry;
-import dev.jlo.kitsune.search.BukkitLiveRootAccess;
 import dev.jlo.kitsune.search.SearchPolicy;
 import dev.jlo.kitsune.search.SearchService;
 import dev.jlo.kitsune.session.BukkitSessionScheduler;

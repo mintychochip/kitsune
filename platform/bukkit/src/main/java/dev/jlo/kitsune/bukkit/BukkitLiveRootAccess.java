@@ -1,5 +1,8 @@
-package dev.jlo.kitsune.search;
+package dev.jlo.kitsune.bukkit;
 
+import dev.jlo.kitsune.search.LiveRootAccess;
+import dev.jlo.kitsune.search.AllowedRoot;
+import dev.jlo.kitsune.search.SearchContext;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Objects;

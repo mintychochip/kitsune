@@ -1,5 +1,6 @@
-package dev.jlo.kitsune.search;
+package dev.jlo.kitsune.bukkit;
 
+import dev.jlo.kitsune.search.ServerThreadBridge;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
