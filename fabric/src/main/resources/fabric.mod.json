@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "kitsune",
+  "version": "${version}",
+  "name": "Kitsune",
+  "description": "Semantic nearby storage search",
+  "authors": ["Kitsune contributors"],
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.jlo.kitsune.fabric.FabricMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
