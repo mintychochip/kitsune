@@ -2,6 +2,7 @@ import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.kotlin.dsl.configure
+import java.util.zip.ZipFile
 
 
 allprojects {
@@ -109,3 +110,31 @@ subprojects {
 
 group = providers.gradleProperty("group").get()
 version = providers.gradleProperty("version").get()
+
+val bundledRuntimeModules = listOf(":fabric", ":forge", ":neoforge")
+val requiredBundledRuntimeEntries = listOf(
+    "org/sqlite/JDBC.class",
+    "com/fasterxml/jackson/databind/ObjectMapper.class"
+)
+
+val verifyBundledRuntimeDependencies = tasks.register("verifyBundledRuntimeDependencies") {
+    dependsOn(bundledRuntimeModules.map { "$it:jar" })
+    doLast {
+        bundledRuntimeModules.forEach { modulePath ->
+            val artifact = project(modulePath).tasks.named("jar").get().outputs.files.singleFile
+            ZipFile(artifact).use { archive ->
+                requiredBundledRuntimeEntries.forEach { entry ->
+                    check(archive.getEntry(entry) != null) {
+                        "$modulePath artifact ${artifact.name} is missing $entry"
+                    }
+                }
+            }
+        }
+    }
+}
+
+subprojects {
+    tasks.matching { it.name == "check" }.configureEach {
+        dependsOn(rootProject.tasks.named("verifyBundledRuntimeDependencies"))
+    }
+}

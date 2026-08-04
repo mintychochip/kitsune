@@ -9,12 +9,13 @@ java {
 }
 
 tasks.jar {
+    duplicatesStrategy = org.gradle.api.file.DuplicatesStrategy.EXCLUDE
     dependsOn(project(":api").tasks.named("classes"), project(":common").tasks.named("classes"))
     from(project(":api").sourceSets.main.get().output)
     from(project(":common").sourceSets.main.get().output)
     project(":common").configurations.getByName("runtimeClasspath")
         .resolve()
-        .filter { it.name.startsWith("sqlite-jdbc-") }
+        .filter { it.extension == "jar" && !it.name.startsWith("api-") }
         .forEach { from(zipTree(it)) }
 }
 tasks.named("clean") {
