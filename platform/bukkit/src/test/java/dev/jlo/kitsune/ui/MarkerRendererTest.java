@@ -1,7 +1,6 @@
 package dev.jlo.kitsune.ui;
 
 import dev.jlo.kitsune.model.BlockKey;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -31,7 +30,7 @@ class MarkerRendererTest {
     @Test
     void configuresDefaultHiddenDisplayBeforeSpawnAndShowsOnlyTheOwner() {
         MarkerHarness harness = MarkerHarness.create(false, false);
-        Component text = Component.text("DIAMOND FOUND · 1 · 7m");
+        String text = "DIAMOND FOUND · 1 · 7m";
 
         RenderedMarker marker = harness.renderer().spawn(
             harness.owner(),
@@ -70,7 +69,7 @@ class MarkerRendererTest {
         Optional<RenderedMarker> marker = harness.renderer().spawn(
             harness.owner(),
             harness.root(),
-            Component.text("private")
+            "private"
         );
 
         assertTrue(marker.isEmpty());
@@ -85,7 +84,7 @@ class MarkerRendererTest {
         Optional<RenderedMarker> marker = harness.renderer().spawn(
             harness.owner(),
             harness.root(),
-            Component.text("private")
+            "private"
         );
 
         assertTrue(marker.isEmpty());
@@ -99,7 +98,7 @@ class MarkerRendererTest {
         BlockKey root,
         UUID displayId,
         List<String> mutableCalls,
-        AtomicReference<Component> text,
+        AtomicReference<String> text,
         AtomicReference<Location> location,
         AtomicInteger loadedChecks,
         AtomicInteger removeCalls
@@ -109,7 +108,7 @@ class MarkerRendererTest {
             UUID playerId = UUID.nameUUIDFromBytes("marker-owner".getBytes(StandardCharsets.UTF_8));
             UUID displayId = UUID.nameUUIDFromBytes("marker-display".getBytes(StandardCharsets.UTF_8));
             List<String> calls = new ArrayList<>();
-            AtomicReference<Component> text = new AtomicReference<>();
+            AtomicReference<String> text = new AtomicReference<>();
             AtomicReference<Location> location = new AtomicReference<>();
             AtomicInteger loadedChecks = new AtomicInteger();
             AtomicInteger removeCalls = new AtomicInteger();
@@ -137,10 +136,10 @@ class MarkerRendererTest {
                     case "setSeeThrough":
                         calls.add("see-through:" + arguments[0]);
                         return null;
-                    case "text":
+                    case "setText":
                         if (arguments != null && arguments.length == 1) {
                             calls.add("text");
-                            text.set((Component) arguments[0]);
+                            text.set((String) arguments[0]);
                             return null;
                         }
                         return text.get();
@@ -224,7 +223,7 @@ class MarkerRendererTest {
             return List.copyOf(mutableCalls);
         }
 
-        private Component displayText() {
+        private String displayText() {
             return text.get();
         }
 

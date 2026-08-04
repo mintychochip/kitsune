@@ -490,7 +490,7 @@ public final class BukkitRuntime implements AutoCloseable {
         });
     }
 
-    private static CompletableFuture<Void> closeRepositoryOffThread(IndexRepository repository) {
+    static CompletableFuture<Void> closeRepositoryOffThread(IndexRepository repository) {
         CompletableFuture<Void> closed = new CompletableFuture<>();
         try {
             Thread.ofPlatform().name("kitsune-close").start(() -> {

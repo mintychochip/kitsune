@@ -1,4 +1,4 @@
-package dev.jlo.kitsune;
+package dev.jlo.kitsune.bukkit;
 
 import org.junit.jupiter.api.Test;
 
@@ -25,11 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class KitsunePluginLifecycleTest {
+class BukkitRuntimeLifecycleTest {
 
     @Test
     void bootstrapLifecycleRejectsStaleCompletionsAfterStop() {
-        KitsunePlugin.BootstrapLifecycle lifecycle = new KitsunePlugin.BootstrapLifecycle();
+        BukkitRuntime.BootstrapLifecycle lifecycle = new BukkitRuntime.BootstrapLifecycle();
         long generation = lifecycle.begin();
         lifecycle.stop();
 
@@ -39,7 +39,7 @@ class KitsunePluginLifecycleTest {
 
     @Test
     void bootstrapLifecycleResetsAfterBeginFollowingStop() {
-        KitsunePlugin.BootstrapLifecycle lifecycle = new KitsunePlugin.BootstrapLifecycle();
+        BukkitRuntime.BootstrapLifecycle lifecycle = new BukkitRuntime.BootstrapLifecycle();
         long first = lifecycle.begin();
         lifecycle.stop();
         long second = lifecycle.begin();
@@ -51,8 +51,8 @@ class KitsunePluginLifecycleTest {
 
     @Test
     void concurrentStaleCompletionsDoNotAdvanceFuture() throws Exception {
-        KitsunePlugin.BootstrapLifecycle lifecycle =
-            new KitsunePlugin.BootstrapLifecycle();
+        BukkitRuntime.BootstrapLifecycle lifecycle =
+            new BukkitRuntime.BootstrapLifecycle();
         long generation = lifecycle.begin();
         CountDownLatch staleReady = new CountDownLatch(1);
         CountDownLatch staleDone = new CountDownLatch(1);
@@ -132,7 +132,7 @@ class KitsunePluginLifecycleTest {
             }
         };
 
-        KitsunePlugin.closeRepositoryOffThread(repository)
+        BukkitRuntime.closeRepositoryOffThread(repository)
                 .get(5, TimeUnit.SECONDS);
 
         assertEquals("kitsune-close", closeThread.get());

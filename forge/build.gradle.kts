@@ -1,3 +1,4 @@
+
 plugins {
     java
     id("net.minecraftforge.gradle") version "7.0.3"
@@ -15,6 +16,15 @@ tasks.jar {
         .resolve()
         .filter { it.name.startsWith("sqlite-jdbc-") }
         .forEach { from(zipTree(it)) }
+}
+tasks.named("clean") {
+    actions.clear()
+    doLast {
+        val buildDirectory = layout.buildDirectory.get().asFile
+        buildDirectory.listFiles()
+            ?.filterNot { it.name == "minecraftforge" }
+            ?.forEach { path -> project.delete(path) }
+    }
 }
 
 minecraft {

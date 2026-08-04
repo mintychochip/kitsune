@@ -2,6 +2,7 @@ package dev.jlo.kitsune.index;
 
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.embedding.SparseTagEmbeddingProvider;
+import dev.jlo.kitsune.item.BukkitTraversalAdapter;
 import dev.jlo.kitsune.item.NestedItemWalker;
 import dev.jlo.kitsune.item.TraversalLimits;
 import dev.jlo.kitsune.model.BlockKey;
@@ -450,13 +451,15 @@ class ContainerIndexLoadedRootRestorationTest {
     ) {
         return new ContainerSnapshotter(
             resolver,
-            NestedItemWalker.forBukkit(
-                proxy(
-                    Server.class,
-                    (method, arguments) ->
-                        defaultValue(method.getReturnType())
-                ),
-                TraversalLimits.defaults()
+            new NestedItemWalker<>(
+                TraversalLimits.defaults(),
+                new BukkitTraversalAdapter(
+                    proxy(
+                        Server.class,
+                        (method, arguments) ->
+                            defaultValue(method.getReturnType())
+                    )
+                )
             )
         );
     }
