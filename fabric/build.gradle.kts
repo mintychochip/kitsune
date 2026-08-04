@@ -2,6 +2,20 @@ plugins {
     id("fabric-loom") version "1.9.2"
     java
 }
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+tasks.jar {
+    dependsOn(project(":api").tasks.named("classes"), project(":common").tasks.named("classes"))
+    from(project(":api").sourceSets.main.get().output)
+    from(project(":common").sourceSets.main.get().output)
+    project(":common").configurations.getByName("runtimeClasspath")
+        .resolve()
+        .filter { it.name.startsWith("sqlite-jdbc-") }
+        .forEach { from(zipTree(it)) }
+}
 
 repositories {
     maven("https://maven.fabricmc.net/")

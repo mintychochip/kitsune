@@ -2,6 +2,20 @@ plugins {
     java
     id("net.minecraftforge.gradle") version "7.0.3"
 }
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+tasks.jar {
+    dependsOn(project(":api").tasks.named("classes"), project(":common").tasks.named("classes"))
+    from(project(":api").sourceSets.main.get().output)
+    from(project(":common").sourceSets.main.get().output)
+    project(":common").configurations.getByName("runtimeClasspath")
+        .resolve()
+        .filter { it.name.startsWith("sqlite-jdbc-") }
+        .forEach { from(zipTree(it)) }
+}
 
 minecraft {
     mappings("official", "1.21.4")
