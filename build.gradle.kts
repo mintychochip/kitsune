@@ -1,7 +1,35 @@
+import org.gradle.api.plugins.JavaPluginExtension
+
 plugins {
     java
     id("com.gradleup.shadow") version "9.4.3"
     id("xyz.jpenilla.run-paper") version "3.0.2"
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        maven("https://repo.papermc.io/repository/maven-public/")
+        maven("https://repo.codemc.io/repository/maven-releases/")
+    }
+}
+
+subprojects {
+    group = rootProject.providers.gradleProperty("group").get()
+    version = rootProject.providers.gradleProperty("version").get()
+
+    pluginManager.withPlugin("java") {
+        extensions.configure<JavaPluginExtension> {
+            toolchain.languageVersion.set(JavaLanguageVersion.of(21))
+        }
+        tasks.withType<JavaCompile>().configureEach {
+            options.encoding = "UTF-8"
+            options.release.set(21)
+        }
+        tasks.withType<Test>().configureEach {
+            useJUnitPlatform()
+        }
+    }
 }
 
 group = providers.gradleProperty("group").get()
