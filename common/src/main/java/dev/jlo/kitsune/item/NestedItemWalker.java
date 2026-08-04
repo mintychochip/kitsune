@@ -1,30 +1,24 @@
 package dev.jlo.kitsune.item;
 
-import java.util.*;
-
 import dev.jlo.kitsune.model.ItemDescriptor;
 import dev.jlo.kitsune.model.ItemDraft;
 import dev.jlo.kitsune.model.ItemPath;
 import dev.jlo.kitsune.model.ItemPathStep;
-import org.bukkit.Server;
-import org.bukkit.inventory.ItemStack;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 public final class NestedItemWalker<T> {
 
     private final TraversalLimits limits;
     private final TraversalAdapter<T> adapter;
 
-    NestedItemWalker(TraversalLimits limits, TraversalAdapter<T> adapter) {
+    public NestedItemWalker(TraversalLimits limits, TraversalAdapter<T> adapter) {
         this.limits = Objects.requireNonNull(limits, "Limits must not be null");
         this.adapter = Objects.requireNonNull(adapter, "Adapter must not be null");
-    }
-
-    public static NestedItemWalker<ItemStack> forBukkit(Server server, TraversalLimits limits) {
-        return new NestedItemWalker<>(limits, new BukkitTraversalAdapter(server));
-    }
-
-    public static NestedItemWalker<ItemStack> forBukkit(Server server) {
-        return forBukkit(server, TraversalLimits.defaults());
     }
 
     public NestedItemWalkResult walk(TraversalChild<T> root) {

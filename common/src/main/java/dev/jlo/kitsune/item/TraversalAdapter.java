@@ -4,7 +4,7 @@ import java.util.List;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
 
-interface TraversalAdapter<T> {
+public interface TraversalAdapter<T> {
     ItemDescriptor describe(T node);
 
     byte[] fingerprint(T node);

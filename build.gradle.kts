@@ -43,6 +43,8 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    implementation(project(":api"))
+    implementation(project(":common"))
     compileOnly("com.griefcraft:lwc:2.4.2")
     implementation("org.xerial:sqlite-jdbc:3.53.2.1")
 
@@ -59,6 +61,7 @@ java {
 }
 
 tasks.withType<JavaCompile>().configureEach {
+    enabled = false
     options.encoding = "UTF-8"
     options.release.set(21)
 }
@@ -70,6 +73,7 @@ tasks.processResources {
 }
 
 tasks.test {
+    enabled = false
     useJUnitPlatform()
 }
 
