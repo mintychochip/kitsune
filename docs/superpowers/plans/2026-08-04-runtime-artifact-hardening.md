@@ -27,12 +27,12 @@
 
 **Interfaces:**
 - Produces a root task named `verifyBundledRuntimeDependencies`.
-- The task depends on `:fabric:jar`, `:forge:jar`, and `:neoforge:jar`.
-- It checks each archive for `org/sqlite/JDBC.class` and `com/fasterxml/jackson/databind/ObjectMapper.class`.
+- The task depends on Fabric's published `:fabric:remapJar` plus `:forge:jar` and `:neoforge:jar`.
+- It checks each shipped archive for `org/sqlite/JDBC.class` and `com/fasterxml/jackson/databind/ObjectMapper.class`.
 
 - [ ] **Step 1: Add the failing verification task before changing jar assembly**
 
-Add these imports at the top of `build.gradle.kts`:
+Add this import at the top of `build.gradle.kts`:
 
 ```kotlin
 import java.util.zip.ZipFile
@@ -41,17 +41,21 @@ import java.util.zip.ZipFile
 Add this root task after the existing `subprojects` publishing block:
 
 ```kotlin
-val bundledRuntimeModules = listOf(":fabric", ":forge", ":neoforge")
+val bundledRuntimeTasks = mapOf(
+    ":fabric" to "remapJar",
+    ":forge" to "jar",
+    ":neoforge" to "jar"
+)
 val requiredBundledRuntimeEntries = listOf(
     "org/sqlite/JDBC.class",
     "com/fasterxml/jackson/databind/ObjectMapper.class"
 )
 
 val verifyBundledRuntimeDependencies = tasks.register("verifyBundledRuntimeDependencies") {
-    dependsOn(bundledRuntimeModules.map { "$it:jar" })
+    dependsOn(bundledRuntimeTasks.map { (modulePath, taskName) -> "$modulePath:$taskName" })
     doLast {
-        bundledRuntimeModules.forEach { modulePath ->
-            val artifact = project(modulePath).tasks.named("jar").get().outputs.files.singleFile
+        bundledRuntimeTasks.forEach { (modulePath, taskName) ->
+            val artifact = project(modulePath).tasks.named(taskName).get().outputs.files.singleFile
             ZipFile(artifact).use { archive ->
                 requiredBundledRuntimeEntries.forEach { entry ->
                     check(archive.getEntry(entry) != null) {
@@ -63,8 +67,10 @@ val verifyBundledRuntimeDependencies = tasks.register("verifyBundledRuntimeDepen
     }
 }
 
-tasks.named("check") {
-    dependsOn(verifyBundledRuntimeDependencies)
+subprojects {
+    tasks.matching { it.name == "check" }.configureEach {
+        dependsOn(rootProject.tasks.named("verifyBundledRuntimeDependencies"))
+    }
 }
 ```
 
