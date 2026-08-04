@@ -45,7 +45,7 @@ Remote settings are represented by an immutable validated configuration object:
 - document prefix and query prefix;
 - request timeout;
 - maximum batch size;
-- maximum response bytes;
+- maximum request and response bytes;
 - bounded retry count.
 
 The credential reference is resolved only at provider construction or request time. The first resolver implementation supports environment references such as `env:KITSUNE_EMBEDDING_API_KEY` and a no-credential mode for explicitly permitted local endpoints. Raw keys are never stored in configuration objects, SQLite, logs, or provider identity fingerprints.
@@ -66,7 +66,7 @@ The provider sends a POST request with the standard shape:
 
 The adapter sends `Authorization: Bearer <credential>` when a credential resolves. It accepts a response containing indexed embedding objects, requires exactly one vector per input, restores response order by index, and rejects malformed, missing, non-finite, zero-norm, or dimension-inconsistent vectors.
 
-The provider supports batch item embedding. A single query is sent as a one-item batch. Requests have bounded connect/read timeouts, response-body limits, and retries for HTTP 429 and transient 5xx responses. Retry counts and delays are bounded; arbitrary failures are surfaced without fallback to another provider.
+The provider supports batch item embedding. A single query is sent as a one-item batch. Requests have bounded connect/read timeouts, serialized request-size limits, response-body limits, and retries for HTTP 429 and transient 5xx responses. Retry counts and delays are bounded; arbitrary failures are surfaced without fallback to another provider.
 
 Item descriptors are converted to deterministic text using fixed field labels and their already-canonical sorted collections. Query text is passed through the configured query prefix. Document text is passed through the configured document prefix. Prefixes are part of provider identity because changing them changes the vector space.
 
@@ -86,7 +86,7 @@ Tests must prove:
 - request method, URL, headers, model, prefixes, and batch ordering;
 - valid response parsing and malformed response rejection;
 - bounded retry on 429/5xx and failure after retry exhaustion;
-- response-body size enforcement and timeout behavior;
+- request and response body-size enforcement and timeout behavior;
 - existing sparse embedding and search behavior remains green.
 
 A local JDK HTTP server is used for integration tests. Tests do not contact real provider services or contain credentials.

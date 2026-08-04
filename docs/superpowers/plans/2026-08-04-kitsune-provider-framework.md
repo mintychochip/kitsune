@@ -13,7 +13,7 @@
 - Preserve `builtin:sparse-v1` as the default provider and offline path.
 - Do not add provider commands, OAuth, browser setup, hosted credential brokerage, profile-shadow schema, staged cutover, or ANN retrieval in this plan.
 - Never put API keys in configuration files, SQLite, logs, test fixtures, or provider identity fingerprints.
-- Remote HTTP calls must run through bounded timeouts, body limits, and retry limits.
+- Remote HTTP calls must run through bounded timeouts, serialized request-size limits, response-body limits, and retry limits.
 - Dense cosine is raw mathematical cosine in `[-1, 1]`; search validation must accept that range.
 - Write tests before production code and observe each new test fail for the intended missing behavior.
 - Do not contact real provider services; use a local JDK HTTP server.
@@ -252,7 +252,7 @@ Expected: compilation failure because the provider and Jackson dependency are ab
 
 - [ ] **Step 3: Add the smallest JSON dependency and provider implementation**
 
-Add a pinned Jackson databind version to the version catalog and `common` implementation dependencies. Use one `ObjectMapper` per provider, construct JSON only from validated values, send `HttpRequest` with bounded timeout and `Authorization` when available, read at most the configured response limit, and parse `data[index].embedding` as finite numeric arrays.
+Add a pinned Jackson databind version to the version catalog and `common` implementation dependencies. Use one `ObjectMapper` per provider, construct JSON only from validated values, enforce the configured serialized request-size limit while batching, send `HttpRequest` with bounded timeout and `Authorization` when available, read at most the configured response limit, and parse `data[index].embedding` as finite numeric arrays.
 
 Retry only HTTP 429 and 500/502/503/504, with a bounded attempt count and bounded delay. Never retry malformed JSON, 4xx other than 429, or credential failures.
 
