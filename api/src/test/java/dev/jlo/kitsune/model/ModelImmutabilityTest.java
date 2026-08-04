@@ -7,7 +7,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
-import dev.jlo.kitsune.embedding.SparseEmbedding;
+import dev.jlo.kitsune.api.embedding.Embedding;
 
 class ModelImmutabilityTest {
 
@@ -19,7 +19,7 @@ class ModelImmutabilityTest {
         ItemPath path = new ItemPath(steps);
         ContainerSnapshot snapshot = new ContainerSnapshot(
             new BlockKey(UUID.randomUUID(), 0, 64, 0), "minecraft:chest", fingerprint, List.of());
-        SparseEmbedding vector = SparseEmbedding.of("builtin:sparse-v1", 1, values);
+        TestEmbedding vector = TestEmbedding.of("builtin:sparse-v1", 1, values);
 
         steps.clear();
         fingerprint[0] = 9;
@@ -168,7 +168,7 @@ class ModelImmutabilityTest {
     void indexedItemValidatesPositiveAmount() {
         var path = new ItemPath(List.of(new ItemPathStep("s", 1)));
         var descriptor = ItemDescriptor.builder().materialKey("m").amount(1).build();
-        assertThrows(IllegalArgumentException.class, () -> new IndexedItem(path, 0, descriptor, SparseEmbedding.of("id", 1, Map.of())));
+        assertThrows(IllegalArgumentException.class, () -> new IndexedItem(path, 0, descriptor, TestEmbedding.of("id", 1, Map.of())));
     }
 
     @Test
@@ -181,5 +181,26 @@ class ModelImmutabilityTest {
         var key = new BlockKey(UUID.randomUUID(), 0, 64, 0);
         var ck = key.chunkKey();
         assertEquals(key.worldId(), ck.worldId());
+    }
+    private record TestEmbedding(String providerId, int providerVersion, Map<String, Double> values)
+        implements Embedding {
+        private static TestEmbedding of(String providerId, int providerVersion, Map<String, Double> values) {
+            return new TestEmbedding(providerId, providerVersion, Map.copyOf(values));
+        }
+
+        @Override
+        public double norm() {
+            return Math.sqrt(values.values().stream().mapToDouble(value -> value * value).sum());
+        }
+
+        @Override
+        public byte[] encode() {
+            return new byte[0];
+        }
+
+        @Override
+        public double cosine(Embedding other) {
+            return 0.0;
+        }
     }
 }
