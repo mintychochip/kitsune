@@ -116,6 +116,31 @@ final class OpenAiCompatibleEmbeddingProviderTest {
     }
 
     @Test
+    void rejectsOversizedRequestBeforeSending() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        try (ServerFixture server = ServerFixture.responding((exchange, attempt) -> {
+            requests.incrementAndGet();
+            respond(exchange, 200, "{\"data\":[{\"index\":0,\"embedding\":[1.0,0.0]}]}");
+        })) {
+            OpenAiCompatibleEmbeddingProvider provider = provider(server.endpoint(), Map.of(
+                "model", "embed-v1",
+                "max-request-bytes", "64"
+            ));
+            ItemDescriptor oversized = ItemDescriptor.builder()
+                .materialKey("minecraft:stone")
+                .amount(1)
+                .addLore("x".repeat(1000))
+                .build();
+
+            assertThrows(
+                IllegalStateException.class,
+                () -> provider.embedAll(List.of(oversized))
+            );
+            assertEquals(0, requests.get());
+        }
+    }
+
+    @Test
     void providerIdentityChangesWithNonSecretModelSettings() throws Exception {
         try (ServerFixture server = ServerFixture.responding((exchange, attempt) ->
             respond(exchange, 200, "{\"data\":[{\"index\":0,\"embedding\":[1.0,0.0]}]}"))) {

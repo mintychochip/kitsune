@@ -11,6 +11,7 @@ import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.model.ItemDescriptor;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.http.HttpClient;
@@ -83,13 +84,31 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
         if (descriptors.isEmpty()) return List.of();
 
         List<Embedding> embeddings = new ArrayList<>(descriptors.size());
-        for (int start = 0; start < descriptors.size(); start += settings.maxBatchSize()) {
-            int end = Math.min(start + settings.maxBatchSize(), descriptors.size());
-            List<String> texts = new ArrayList<>(end - start);
-            for (int index = start; index < end; index++) {
-                texts.add(settings.documentPrefix() + EmbeddingTextSerializer.document(descriptors.get(index)));
+        List<String> batch = new ArrayList<>(settings.maxBatchSize());
+        for (ItemDescriptor descriptor : descriptors) {
+            String text = settings.documentPrefix() + EmbeddingTextSerializer.document(descriptor);
+            if (batch.size() == settings.maxBatchSize()) {
+                embeddings.addAll(request(batch));
+                batch.clear();
             }
-            embeddings.addAll(request(texts));
+
+            List<String> candidate = new ArrayList<>(batch.size() + 1);
+            candidate.addAll(batch);
+            candidate.add(text);
+            if (!fitsRequest(candidate)) {
+                if (batch.isEmpty()) {
+                    throw new IllegalStateException("Embedding input exceeds configured request size");
+                }
+                embeddings.addAll(request(batch));
+                batch.clear();
+                if (!fitsRequest(List.of(text))) {
+                    throw new IllegalStateException("Embedding input exceeds configured request size");
+                }
+            }
+            batch.add(text);
+        }
+        if (!batch.isEmpty()) {
+            embeddings.addAll(request(batch));
         }
         return List.copyOf(embeddings);
     }
@@ -143,6 +162,15 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
         }
     }
 
+    private boolean fitsRequest(List<String> inputs) {
+        try {
+            requestBody(inputs);
+            return true;
+        } catch (RequestTooLargeException tooLarge) {
+            return false;
+        }
+    }
+
     private byte[] requestBody(List<String> inputs) {
         try {
             ObjectNode root = mapper.createObjectNode();
@@ -152,7 +180,11 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
             for (String input : inputs) {
                 values.add(input);
             }
-            return mapper.writeValueAsBytes(root);
+            BoundedOutputStream output = new BoundedOutputStream(settings.maxRequestBytes());
+            mapper.writeValue(output, root);
+            return output.bytes();
+        } catch (RequestTooLargeException tooLarge) {
+            throw tooLarge;
         } catch (IOException failure) {
             throw new IllegalStateException("Failed to encode embedding request", failure);
         }
@@ -237,6 +269,44 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
             throw failure;
         } catch (IOException failure) {
             throw new IllegalStateException("Failed to read embedding response", failure);
+        }
+    }
+
+    private static final class RequestTooLargeException extends IllegalStateException {
+        private RequestTooLargeException(int maximumBytes) {
+            super("Embedding request exceeds configured size limit: " + maximumBytes);
+        }
+    }
+
+    private static final class BoundedOutputStream extends OutputStream {
+        private final ByteArrayOutputStream delegate = new ByteArrayOutputStream();
+        private final int maximumBytes;
+
+        private BoundedOutputStream(int maximumBytes) {
+            this.maximumBytes = maximumBytes;
+        }
+
+        @Override
+        public void write(int value) {
+            ensureCapacity(1);
+            delegate.write(value);
+        }
+
+        @Override
+        public void write(byte[] values, int offset, int length) {
+            Objects.checkFromIndexSize(offset, length, values.length);
+            ensureCapacity(length);
+            delegate.write(values, offset, length);
+        }
+
+        private void ensureCapacity(int additionalBytes) {
+            if (additionalBytes > maximumBytes - delegate.size()) {
+                throw new RequestTooLargeException(maximumBytes);
+            }
+        }
+
+        private byte[] bytes() {
+            return delegate.toByteArray();
         }
     }
 

@@ -14,6 +14,7 @@ public record OpenAiCompatibleEmbeddingSettings(
     Duration requestTimeout,
     int maxBatchSize,
     int maxResponseBytes,
+    int maxRequestBytes,
     int maxRetries,
     boolean allowInsecureHttp,
     int dimensions
@@ -21,6 +22,7 @@ public record OpenAiCompatibleEmbeddingSettings(
     public static final int MAX_DIMENSIONS = 16_384;
     public static final int MAX_BATCH_SIZE = 256;
     public static final int MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+    public static final int MAX_REQUEST_BYTES = 16 * 1024 * 1024;
     public static final int MAX_RETRIES = 3;
 
     public OpenAiCompatibleEmbeddingSettings {
@@ -52,6 +54,9 @@ public record OpenAiCompatibleEmbeddingSettings(
         if (maxResponseBytes < 1 || maxResponseBytes > MAX_RESPONSE_BYTES) {
             throw new IllegalArgumentException("Response limit is out of bounds");
         }
+        if (maxRequestBytes < 1 || maxRequestBytes > MAX_REQUEST_BYTES) {
+            throw new IllegalArgumentException("Request limit is out of bounds");
+        }
         if (maxRetries < 0 || maxRetries > MAX_RETRIES) {
             throw new IllegalArgumentException("Retries must be between 0 and " + MAX_RETRIES);
         }
@@ -70,6 +75,7 @@ public record OpenAiCompatibleEmbeddingSettings(
         Duration timeout = Duration.ofMillis(integerSetting(settings, "request-timeout-millis", 10_000));
         int batchSize = integerSetting(settings, "max-batch-size", 32);
         int responseBytes = integerSetting(settings, "max-response-bytes", 4 * 1024 * 1024);
+        int requestBytes = integerSetting(settings, "max-request-bytes", 1 * 1024 * 1024);
         int retries = integerSetting(settings, "max-retries", 2);
         boolean allowInsecureHttp = booleanSetting(settings, "allow-insecure-http", false);
         int dimensions = integerSetting(settings, "dimensions", 0);
@@ -82,6 +88,7 @@ public record OpenAiCompatibleEmbeddingSettings(
             timeout,
             batchSize,
             responseBytes,
+            requestBytes,
             retries,
             allowInsecureHttp,
             dimensions
