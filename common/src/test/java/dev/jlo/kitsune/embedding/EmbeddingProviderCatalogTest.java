@@ -4,6 +4,7 @@ import dev.jlo.kitsune.api.embedding.Embedding;
 import dev.jlo.kitsune.api.embedding.EmbeddingCredentialResolver;
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.api.embedding.EmbeddingProviderFactory;
+import dev.jlo.kitsune.embedding.remote.OpenAiCompatibleEmbeddingProvider;
 import dev.jlo.kitsune.model.ItemDescriptor;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,27 @@ final class EmbeddingProviderCatalogTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> new EmbeddingProviderCatalog(List.of(first, second))
+        );
+    }
+
+    @Test
+    void defaultCatalogIncludesBuiltInFactories() {
+        EmbeddingProviderCatalog catalog = EmbeddingProviderCatalog.defaults();
+
+        assertEquals(
+            List.of(
+                SparseTagEmbeddingProvider.ID,
+                OpenAiCompatibleEmbeddingProvider.FACTORY_ID
+            ),
+            catalog.factories().stream().map(EmbeddingProviderFactory::id).toList()
+        );
+        assertEquals(
+            SparseTagEmbeddingProvider.ID,
+            catalog.create(
+                SparseTagEmbeddingProvider.ID,
+                Map.of(),
+                reference -> Optional.empty()
+            ).id()
         );
     }
 

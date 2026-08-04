@@ -3,6 +3,7 @@ package dev.jlo.kitsune.embedding;
 import dev.jlo.kitsune.api.embedding.EmbeddingCredentialResolver;
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.api.embedding.EmbeddingProviderFactory;
+import dev.jlo.kitsune.embedding.remote.OpenAiCompatibleEmbeddingProviderFactory;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -27,6 +28,13 @@ public final class EmbeddingProviderCatalog {
             }
         }
         this.factories = Collections.unmodifiableMap(all);
+    }
+
+    public static EmbeddingProviderCatalog defaults() {
+        return new EmbeddingProviderCatalog(java.util.List.of(
+            new SparseTagEmbeddingProviderFactory(),
+            new OpenAiCompatibleEmbeddingProviderFactory()
+        ));
     }
 
     public Collection<EmbeddingProviderFactory> factories() {
