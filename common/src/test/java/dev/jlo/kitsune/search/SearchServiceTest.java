@@ -247,6 +247,20 @@ class SearchServiceTest {
     }
 
     @Test
+    void negativeCosineIsValidAndCanBeFiltered() throws Exception {
+        SearchPolicy policy = new SearchPolicy(16, 0.0, 10, 3, Duration.ofSeconds(1));
+        RootSeed packed = seedRoot(2, 64, 0, false, false,
+            scoreMatch("opposite", -0.25, 0));
+
+        try (SearchHarness harness = SearchHarness.create(policy, packed)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.NO_MATCHES, outcome.status());
+            assertEquals(0, outcome.totalAccessibleMatchingRoots());
+        }
+    }
+
+    @Test
     void supersededTokenCancelsBeforeDocumentLoad() throws Exception {
         RootSeed packed = seedRoot(2, 64, 0, false, false, scoreMatch("a", 0.95, 0));
 

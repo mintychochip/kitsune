@@ -311,7 +311,7 @@ public final class SearchService {
             for (IndexedItem item : items) {
                 Objects.requireNonNull(item, "Indexed item must not be null");
                 double score = item.embedding().cosine(queryEmbedding);
-                if (!Double.isFinite(score) || score < 0.0 || score > 1.0) {
+                if (!Double.isFinite(score) || score < -1.0 || score > 1.0) {
                     throw new IllegalStateException("Embedding provider returned an invalid cosine score");
                 }
                 if (score >= policy.minimumScore()) {
