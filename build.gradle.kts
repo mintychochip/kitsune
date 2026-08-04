@@ -111,17 +111,21 @@ subprojects {
 group = providers.gradleProperty("group").get()
 version = providers.gradleProperty("version").get()
 
-val bundledRuntimeModules = listOf(":fabric", ":forge", ":neoforge")
+val bundledRuntimeTasks = mapOf(
+    ":fabric" to "remapJar",
+    ":forge" to "jar",
+    ":neoforge" to "jar"
+)
 val requiredBundledRuntimeEntries = listOf(
     "org/sqlite/JDBC.class",
     "com/fasterxml/jackson/databind/ObjectMapper.class"
 )
 
 val verifyBundledRuntimeDependencies = tasks.register("verifyBundledRuntimeDependencies") {
-    dependsOn(bundledRuntimeModules.map { "$it:jar" })
+    dependsOn(bundledRuntimeTasks.map { (modulePath, taskName) -> "$modulePath:$taskName" })
     doLast {
-        bundledRuntimeModules.forEach { modulePath ->
-            val artifact = project(modulePath).tasks.named("jar").get().outputs.files.singleFile
+        bundledRuntimeTasks.forEach { (modulePath, taskName) ->
+            val artifact = project(modulePath).tasks.named(taskName).get().outputs.files.singleFile
             ZipFile(artifact).use { archive ->
                 requiredBundledRuntimeEntries.forEach { entry ->
                     check(archive.getEntry(entry) != null) {
