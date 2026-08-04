@@ -91,7 +91,6 @@ public record OpenAiCompatibleEmbeddingSettings(
     public String fingerprintMaterial() {
         return endpoint + "\n"
             + model + "\n"
-            + credentialReference + "\n"
             + documentPrefix + "\n"
             + queryPrefix + "\n"
             + requestTimeout.toMillis() + "\n"
@@ -113,9 +112,6 @@ public record OpenAiCompatibleEmbeddingSettings(
         return value.trim();
     }
 
-    private static String optional(String value) {
-        return value == null ? "" : value.trim();
-    }
 
     private static int integerSetting(Map<String, String> settings, String key, int defaultValue) {
         String value = settings.get(key);
