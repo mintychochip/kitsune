@@ -34,12 +34,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+/** Exercises SQLite repository migration, replacement, and query behavior. */
 class SqliteIndexRepositoryTest {
 
+    /** Provides a temporary SQLite repository and direct inspection helpers. */
     static final class RepositoryTestFixture implements AutoCloseable {
         private final IndexRepository repository;
         private final Connection connection;
 
+        /** Opens and migrates the repository at the supplied database path. */
         RepositoryTestFixture(Path database) throws Exception {
             this.connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
             connection.setAutoCommit(true);
@@ -468,6 +471,32 @@ class SqliteIndexRepositoryTest {
     }
 
     @Test
+    void reembedAllEmbedsEachSemanticHashOnceAndRefreshesCache(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("reembed-unique.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            ItemDescriptor one = ItemDescriptor.builder().materialKey("minecraft:cobblestone").amount(1).build();
+            ItemDescriptor stack = ItemDescriptor.builder().materialKey("minecraft:cobblestone").amount(64).build();
+            EmbeddingProvider original = fakeProvider("builtin:count", 1, one);
+            List<IndexedItem> items = List.of(
+                    new IndexedItem(new ItemPath(List.of(new ItemPathStep("Storage", 0))), 1, one, original.embed(one)),
+                    new IndexedItem(new ItemPath(List.of(new ItemPathStep("Storage", 1))), 64, stack, original.embed(stack))
+            );
+            fixture.repository().replaceRoot(
+                    new ContainerSnapshot(root, "chest", new byte[]{1, 2, 3}, items), 1);
+
+            AtomicInteger embedCalls = new AtomicInteger();
+            EmbeddingProvider updated = countingProvider("builtin:count", 2, embedCalls);
+            fixture.repository().reembedAll(updated);
+
+            assertEquals(1, embedCalls.get());
+            Map<SemanticDescriptorHash, Embedding> cached = fixture.repository().findEmbeddings(
+                    updated, Set.of(SemanticDescriptorHash.of(one)));
+            assertEquals(1, cached.size());
+            assertEquals(2, cached.values().iterator().next().providerVersion());
+        }
+    }
+
+    @Test
     void providerMismatchRejected(@TempDir Path tempDir) throws Exception {
         try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("provider.db"))) {
             BlockKey root = fixture.key(0, 64, 0);
@@ -805,6 +834,29 @@ class SqliteIndexRepositoryTest {
                 }
             }
         }
+    }
+
+    private static EmbeddingProvider countingProvider(
+            String id, int version, AtomicInteger embedCalls) {
+        return new EmbeddingProvider() {
+            @Override
+            public String id() { return id; }
+            @Override
+            public int version() { return version; }
+            @Override
+            public Embedding embed(ItemDescriptor descriptor) {
+                embedCalls.incrementAndGet();
+                return new FakeEmbedding(id, version, descriptor);
+            }
+            @Override
+            public Embedding embedQuery(String query) {
+                return new FakeEmbedding(id, version, null);
+            }
+            @Override
+            public Embedding decode(byte[] payload, double norm) {
+                return new FakeEmbedding(id, version, null);
+            }
+        };
     }
 
     private static EmbeddingProvider fakeProvider(String id, int version, ItemDescriptor descriptor) {

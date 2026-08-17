@@ -572,42 +572,88 @@ public final class SqliteIndexRepository implements IndexRepository {
         connection.setAutoCommit(false);
         Throwable primary = null;
         try {
+            Map<SemanticDescriptorHash, Embedding> byHash = new LinkedHashMap<>();
             long lastRowid = 0;
             while (true) {
-                List<long[]> rowids = new ArrayList<>();
-                List<byte[]> descriptors = new ArrayList<>();
+                List<Long> rowids = new ArrayList<>();
+                List<ItemDescriptor> descriptors = new ArrayList<>();
+                List<SemanticDescriptorHash> hashes = new ArrayList<>();
                 try (PreparedStatement select = connection.prepareStatement(
                         "SELECT rowid, descriptor FROM items WHERE rowid > ? ORDER BY rowid LIMIT ?")) {
                     select.setLong(1, lastRowid);
                     select.setInt(2, REEMBED_BATCH);
                     try (ResultSet rs = select.executeQuery()) {
                         while (rs.next()) {
-                            rowids.add(new long[]{rs.getLong(1)});
-                            descriptors.add(rs.getBytes(2));
+                            ItemDescriptor descriptor = DescriptorCodec.decode(rs.getBytes(2));
+                            rowids.add(rs.getLong(1));
+                            descriptors.add(descriptor);
+                            hashes.add(SemanticDescriptorHash.of(descriptor));
                         }
                     }
                 }
                 if (rowids.isEmpty()) {
                     break;
                 }
-                lastRowid = rowids.get(rowids.size() - 1)[0];
+                lastRowid = rowids.getLast();
+
+                Map<SemanticDescriptorHash, ItemDescriptor> missing = new LinkedHashMap<>();
+                for (int i = 0; i < hashes.size(); i++) {
+                    SemanticDescriptorHash hash = hashes.get(i);
+                    if (!byHash.containsKey(hash)) {
+                        missing.putIfAbsent(hash, descriptors.get(i));
+                    }
+                }
+                if (!missing.isEmpty()) {
+                    List<ItemDescriptor> toEmbed = new ArrayList<>(missing.values());
+                    List<Embedding> embeddings = provider.embedAll(toEmbed);
+                    if (embeddings.size() != toEmbed.size()) {
+                        throw new IllegalStateException("Embedding provider returned a mismatched batch");
+                    }
+                    int index = 0;
+                    for (SemanticDescriptorHash hash : missing.keySet()) {
+                        byHash.put(hash, requireProviderIdentity(provider, embeddings.get(index++)));
+                    }
+                }
+
                 try (PreparedStatement update = connection.prepareStatement(
                         "UPDATE items SET provider_id = ?, provider_version = ?, vector = ?, vector_norm = ? WHERE rowid = ?")) {
                     for (int i = 0; i < rowids.size(); i++) {
-                        ItemDescriptor descriptor = DescriptorCodec.decode(descriptors.get(i));
-                        Embedding embedding = requireProviderIdentity(
-                                provider, provider.embed(descriptor));
+                        Embedding embedding = byHash.get(hashes.get(i));
                         update.setString(1, embedding.providerId());
                         update.setInt(2, embedding.providerVersion());
                         update.setBytes(3, embedding.encode());
                         update.setDouble(4, embedding.norm());
-                        update.setLong(5, rowids.get(i)[0]);
+                        update.setLong(5, rowids.get(i));
                         update.addBatch();
                     }
                     update.executeBatch();
                     connection.commit();
                 }
             }
+            if (!byHash.isEmpty()) {
+                try (PreparedStatement upsert = connection.prepareStatement(
+                        "INSERT OR REPLACE INTO embeddings "
+                                + "(provider_id, provider_version, descriptor_hash, vector, vector_norm) "
+                                + "VALUES (?, ?, ?, ?, ?)")) {
+                    for (Map.Entry<SemanticDescriptorHash, Embedding> entry : byHash.entrySet()) {
+                        Embedding embedding = entry.getValue();
+                        upsert.setString(1, embedding.providerId());
+                        upsert.setInt(2, embedding.providerVersion());
+                        upsert.setBytes(3, entry.getKey().bytes());
+                        upsert.setBytes(4, embedding.encode());
+                        upsert.setDouble(5, embedding.norm());
+                        upsert.addBatch();
+                    }
+                    upsert.executeBatch();
+                }
+            }
+            try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM embeddings WHERE provider_id <> ? OR provider_version <> ?")) {
+                delete.setString(1, provider.id());
+                delete.setInt(2, provider.version());
+                delete.executeUpdate();
+            }
+            connection.commit();
         } catch (RuntimeException | SQLException ex) {
             primary = ex;
             try { connection.rollback(); } catch (SQLException r) { ex.addSuppressed(r); }

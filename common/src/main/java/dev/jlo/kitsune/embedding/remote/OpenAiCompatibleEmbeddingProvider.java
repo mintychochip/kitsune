@@ -26,8 +26,20 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * An {@link EmbeddingProvider} backed by an OpenAI-compatible embeddings HTTP
+ * API.
+ *
+ * <p>Inputs are serialized, batched and sent to the configured endpoint with
+ * optional bearer-token authorization. Responses are validated for count,
+ * index, dimensions, and finiteness, and retried on transient failures.
+ *
+ * @see OpenAiCompatibleEmbeddingSettings
+ */
 public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
+    /** Provider id reported by {@link #id()}. */
     public static final String FACTORY_ID = "remote:openai-compatible";
+    /** Version of the embedding wire format produced by this provider. */
     public static final int VERSION = 1;
 
     private final OpenAiCompatibleEmbeddingSettings settings;
@@ -36,6 +48,13 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
     private final ObjectMapper mapper;
     private final String id;
 
+    /**
+     * Creates a provider using a default {@link HttpClient} and JSON mapper.
+     *
+     * @param settings    settings configuring the provider
+     * @param credentials credential resolver for authorization
+     * @throws NullPointerException if either argument is null
+     */
     public OpenAiCompatibleEmbeddingProvider(
         OpenAiCompatibleEmbeddingSettings settings,
         EmbeddingCredentialResolver credentials
@@ -79,6 +98,17 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
         return embedAll(List.of(descriptor)).getFirst();
     }
 
+    /**
+     * Embeds a batch of descriptors, batching and size-splitting inputs as
+     * needed.
+     *
+     * @param descriptors descriptors to embed
+     * @return an immutable list of embeddings in input order
+     * @throws NullPointerException if the descriptors collection is null
+     * @throws IllegalStateException if a request fails or a single input
+     *         exceeds the configured request size
+     */
+    @Override
     public List<Embedding> embedAll(List<ItemDescriptor> descriptors) {
         Objects.requireNonNull(descriptors, "Descriptors must not be null");
         if (descriptors.isEmpty()) return List.of();
@@ -113,12 +143,26 @@ public final class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvide
         return List.copyOf(embeddings);
     }
 
+    /**
+     * Embeds a query string, applying the configured query prefix.
+     *
+     * @param query query to embed
+     * @return the query embedding
+     * @throws NullPointerException if the query is null
+     */
     @Override
     public Embedding embedQuery(String query) {
         String text = settings.queryPrefix() + EmbeddingTextSerializer.query(query);
         return request(List.of(text)).getFirst();
     }
 
+    /**
+     * Decodes an embedding previously produced by this provider.
+     *
+     * @param payload encoded embedding payload
+     * @param norm    recorded vector norm
+     * @return the decoded embedding
+     */
     @Override
     public Embedding decode(byte[] payload, double norm) {
         return DenseEmbedding.decode(id, VERSION, payload, norm);
