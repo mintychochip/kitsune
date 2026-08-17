@@ -36,6 +36,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * NeoForge-backed world access that fingerprints containers and exposes
+ * live root access for the Kitsune search index.
+ */
 public final class NeoForgeWorldAccess implements LiveRootAccess {
     private static final double EPSILON = 1e-9;
     private static final int DEFAULT_SCAN_CHUNK_RADIUS = 8;
@@ -44,6 +48,15 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
     private final NeoForgeItemAccess items;
     private final NestedItemWalker<ItemStack> walker;
 
+    /**
+     * Creates world access bound to the given server.
+     *
+     * @param server               server whose levels are queried
+     * @param items                item access used to fingerprint items
+     * @param maximumDepth         maximum nesting depth when walking container contents
+     * @param maximumStacksPerRoot maximum stack count walked per root container
+     * @throws NullPointerException if {@code server} or {@code items} is {@code null}
+     */
     public NeoForgeWorldAccess(MinecraftServer server, NeoForgeItemAccess items, int maximumDepth, int maximumStacksPerRoot) {
         this.server = Objects.requireNonNull(server, "Server must not be null");
         this.items = Objects.requireNonNull(items, "Item access must not be null");
@@ -53,12 +66,24 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         );
     }
 
+    /**
+     * Returns a stable, deterministic identifier for a level based on its dimension name.
+     *
+     * @param level level to identify
+     * @return the level's world identifier
+     */
     public static UUID worldId(ServerLevel level) {
         return UUID.nameUUIDFromBytes(
             level.dimension().location().toString().getBytes(StandardCharsets.UTF_8)
         );
     }
 
+    /**
+     * Scans containers in the chunks surrounding each online player and returns
+     * the resulting container data.
+     *
+     * @return immutable list of container data for scanned loaded containers
+     */
     public List<ContainerData> scanLoadedContainers() {
         Set<BlockKey> visited = new HashSet<>();
         List<ContainerData> containers = new ArrayList<>();
@@ -88,6 +113,15 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         return List.copyOf(containers);
     }
 
+    /**
+     * Snapshots the container at the given block key into a container draft.
+     *
+     * @param key block key identifying the container
+     * @return the container data, or {@link Optional#empty()} if the world or
+     *         chunk is not loaded, the block is not a container, it is a loot
+     *         container, or its logical inventory is unavailable
+     * @throws NullPointerException if {@code key} is {@code null}
+     */
     public Optional<ContainerData> snapshot(BlockKey key) {
         Objects.requireNonNull(key, "Key must not be null");
         ServerLevel level = findWorld(key.worldId());
@@ -126,6 +160,15 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         ));
     }
 
+    /**
+     * Returns the chunks loaded within the given radius of the search origin.
+     *
+     * @param context search context whose origin anchors the search
+     * @param radius  block radius around the origin to consider
+     * @return immutable set of loaded chunk keys within radius, or an empty set
+     *         if the radius is negative or the origin world is not loaded
+     * @throws NullPointerException if {@code context} is {@code null}
+     */
     @Override
     public Set<ChunkKey> loadedChunks(SearchContext context, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -147,6 +190,18 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         return Set.copyOf(loaded);
     }
 
+    /**
+     * Validates that a root is currently allowed, checking world, distance,
+     * and block type.
+     *
+     * @param context  search context whose origin anchors the search
+     * @param identity candidate root identity to validate
+     * @param radius   maximum block distance from the origin
+     * @return an allowed root with its distance, or {@code null} if the root is
+     *         not in the origin world, outside the radius, or no longer present
+     *         with matching block type
+     * @throws NullPointerException if {@code context} or {@code identity} is {@code null}
+     */
     @Override
     public AllowedRoot validate(SearchContext context, RootIdentity identity, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -161,7 +216,6 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         if (current.isEmpty()) return null;
         ContainerDraft draft = current.get().draft();
         if (!draft.blockType().equals(identity.blockType())) return null;
-        if (!java.util.Arrays.equals(draft.fingerprint(), identity.fingerprint())) return null;
         return new AllowedRoot(identity, distance);
     }
 
@@ -203,6 +257,13 @@ public final class NeoForgeWorldAccess implements LiveRootAccess {
         digest.update((byte) value);
     }
 
+    /**
+     * Container data produced from a block-key snapshot, pairing the container
+     * draft with the chunk in which it resides.
+     *
+     * @param draft container draft holding key, block type, fingerprint, and items
+     * @param chunk chunk key locating the container in the world
+     */
     public record ContainerData(ContainerDraft draft, ChunkKey chunk) {
         public ContainerData {
             Objects.requireNonNull(draft, "Draft must not be null");

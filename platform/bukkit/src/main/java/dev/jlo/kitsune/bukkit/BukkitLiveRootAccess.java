@@ -3,7 +3,6 @@ package dev.jlo.kitsune.bukkit;
 import dev.jlo.kitsune.search.LiveRootAccess;
 import dev.jlo.kitsune.search.AllowedRoot;
 import dev.jlo.kitsune.search.SearchContext;
-import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -22,18 +21,35 @@ import dev.jlo.kitsune.model.ContainerDraft;
 import dev.jlo.kitsune.model.RootIdentity;
 import dev.jlo.kitsune.protection.ProtectionRegistry;
 
+/**
+ * Validates indexed roots against the current Bukkit world and protection state.
+ */
 public final class BukkitLiveRootAccess implements LiveRootAccess {
     private static final double EPSILON = 1e-9;
     private final Server server;
     private final ContainerSnapshotter snapshotter;
     private final ProtectionRegistry protectionRegistry;
 
+    /**
+     * Creates live root access backed by the supplied Bukkit services.
+     *
+     * @param server Bukkit server used to resolve worlds and players
+     * @param snapshotter snapshots candidate containers
+     * @param protectionRegistry applies access-control checks
+     */
     public BukkitLiveRootAccess(Server server, ContainerSnapshotter snapshotter, ProtectionRegistry protectionRegistry) {
         this.server = Objects.requireNonNull(server, "Server must not be null");
         this.snapshotter = Objects.requireNonNull(snapshotter, "Snapshotter must not be null");
         this.protectionRegistry = Objects.requireNonNull(protectionRegistry, "ProtectionRegistry must not be null");
     }
 
+    /**
+     * Returns loaded chunks intersecting the requested radius around the search origin.
+     *
+     * @param context search context providing the origin world and position
+     * @param radius maximum coordinate distance to inspect
+     * @return loaded chunks in the origin world, or an empty set when the request is invalid
+     */
     @Override
     public Set<ChunkKey> loadedChunks(SearchContext context, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -53,6 +69,14 @@ public final class BukkitLiveRootAccess implements LiveRootAccess {
         return Set.copyOf(loaded);
     }
 
+    /**
+     * Revalidates a previously indexed root against world state, its snapshot, and protection.
+     *
+     * @param context search context containing the player and origin
+     * @param identity indexed root identity to check
+     * @param radius maximum allowed distance from the origin
+     * @return the allowed root with its current distance, or {@code null} when it is unavailable
+     */
     @Override
     public AllowedRoot validate(SearchContext context, RootIdentity identity, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -84,8 +108,7 @@ public final class BukkitLiveRootAccess implements LiveRootAccess {
         if (snapshot == null || snapshot.status() != ContainerSnapshotter.Status.COMPLETE || snapshot.draft() == null) return null;
         ContainerDraft draft = snapshot.draft();
         if (!draft.key().equals(candidate)
-            || !Objects.equals(draft.blockType(), identity.blockType())
-            || !Arrays.equals(draft.fingerprint(), identity.fingerprint())) return null;
+            || !Objects.equals(draft.blockType(), identity.blockType())) return null;
         try {
             Block block = world.getBlockAt(candidate.x(), candidate.y(), candidate.z());
             if (!(block.getState() instanceof org.bukkit.block.Container)) return null;

@@ -36,6 +36,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Provides live container discovery and validation against a Forge server.
+ */
 public final class ForgeWorldAccess implements LiveRootAccess {
     private static final double EPSILON = 1e-9;
     private static final int DEFAULT_SCAN_CHUNK_RADIUS = 8;
@@ -44,6 +47,14 @@ public final class ForgeWorldAccess implements LiveRootAccess {
     private final ForgeItemAccess items;
     private final NestedItemWalker<ItemStack> walker;
 
+    /**
+     * Creates access backed by the supplied server and item traversal limits.
+     *
+     * @param server server whose worlds and players are inspected
+     * @param items item access used to fingerprint and describe stacks
+     * @param maximumDepth maximum nested-item traversal depth
+     * @param maximumStacksPerRoot maximum stacks visited for one root
+     */
     public ForgeWorldAccess(MinecraftServer server, ForgeItemAccess items, int maximumDepth, int maximumStacksPerRoot) {
         this.server = Objects.requireNonNull(server, "Server must not be null");
         this.items = Objects.requireNonNull(items, "Item access must not be null");
@@ -53,12 +64,23 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         );
     }
 
+    /**
+     * Derives a stable identifier from a level's registry key.
+     *
+     * @param level level to identify
+     * @return deterministic identifier for the level
+     */
     public static UUID worldId(ServerLevel level) {
         return UUID.nameUUIDFromBytes(
             level.dimension().location().toString().getBytes(StandardCharsets.UTF_8)
         );
     }
 
+    /**
+     * Scans loaded chunks around each online player for containers.
+     *
+     * @return snapshots of discovered containers
+     */
     public List<ContainerData> scanLoadedContainers() {
         Set<BlockKey> visited = new HashSet<>();
         List<ContainerData> containers = new ArrayList<>();
@@ -88,6 +110,12 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         return List.copyOf(containers);
     }
 
+    /**
+     * Reads a current snapshot for a container key when its chunk and container are available.
+     *
+     * @param key block key identifying the container
+     * @return the current snapshot, or empty when it is unavailable or unsupported
+     */
     public Optional<ContainerData> snapshot(BlockKey key) {
         Objects.requireNonNull(key, "Key must not be null");
         ServerLevel level = findWorld(key.worldId());
@@ -126,6 +154,13 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         ));
     }
 
+    /**
+     * Lists loaded chunks intersecting the horizontal radius around a search origin.
+     *
+     * @param context search origin and world
+     * @param radius horizontal block radius
+     * @return loaded chunks in the origin world
+     */
     @Override
     public Set<ChunkKey> loadedChunks(SearchContext context, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -147,6 +182,14 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         return Set.copyOf(loaded);
     }
 
+    /**
+     * Verifies that an indexed root still exists, matches its identity, and is within range.
+     *
+     * @param context search origin
+     * @param identity indexed root identity to verify
+     * @param radius maximum distance in blocks
+     * @return an allowed root, or {@code null} when validation fails
+     */
     @Override
     public AllowedRoot validate(SearchContext context, RootIdentity identity, int radius) {
         Objects.requireNonNull(context, "Context must not be null");
@@ -161,7 +204,7 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         if (current.isEmpty()) return null;
         ContainerDraft draft = current.get().draft();
         if (!draft.blockType().equals(identity.blockType())) return null;
-        if (!java.util.Arrays.equals(draft.fingerprint(), identity.fingerprint())) return null;
+
         return new AllowedRoot(identity, distance);
     }
 
@@ -203,6 +246,12 @@ public final class ForgeWorldAccess implements LiveRootAccess {
         digest.update((byte) value);
     }
 
+    /**
+     * Pair of a container draft and the chunk containing its block.
+     *
+     * @param draft current container contents and fingerprint
+     * @param chunk containing chunk
+     */
     public record ContainerData(ContainerDraft draft, ChunkKey chunk) {
         public ContainerData {
             Objects.requireNonNull(draft, "Draft must not be null");

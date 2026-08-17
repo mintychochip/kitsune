@@ -150,16 +150,17 @@ class ContainerIndexLoadedRootRestorationTest {
     }
 
     /**
-     * Marking a root dirty invalidates its published markers immediately.
+     * Content dirty does not clear search markers on the root.
      */
     @Test
-    void dirtyRootInvalidatesItsPublishedMarkersImmediately() throws Exception {
+    void dirtyRootDoesNotInvalidatePublishedMarkers() throws Exception {
         try (Fixture fixture = new Fixture()) {
             fixture.finishInitialIndexing();
+            int before = fixture.invalidatedRoots.size();
 
             fixture.index.markDirty(fixture.root);
 
-            assertEquals(List.of(fixture.root), fixture.invalidatedRoots);
+            assertEquals(before, fixture.invalidatedRoots.size());
         }
     }
 

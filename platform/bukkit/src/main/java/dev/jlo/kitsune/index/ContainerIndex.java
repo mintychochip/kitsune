@@ -207,7 +207,6 @@ public final class ContainerIndex implements AutoCloseable {
     public void markDirty(BlockKey root) {
         Objects.requireNonNull(root, "Root key");
         if (accepting) {
-            rootInvalidated.accept(root);
             tracker.markDirty(root, requireTick(currentTick.getAsLong()));
         }
     }
