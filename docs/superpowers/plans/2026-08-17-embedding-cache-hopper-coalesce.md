@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Implemented on `embedding-cache-hopper-coalesce`. Full `./gradlew test` passed on 2026-08-17.
+
 **Goal:** Reuse embeddings by semantic descriptor hash and stop hopper transfers from re-embedding every stack or dropping chests from search.
 
 **Architecture:** Add SHA-256 semantic hashes (descriptor codec with amount forced to 1), a version-2 `embeddings` table, and a worker-side resolver that `embedAll`s only cache misses. Debounce transfer dirties, do not cancel in-flight snapshots, stop content-dirty from clearing search markers, and drop live fingerprint equality.
