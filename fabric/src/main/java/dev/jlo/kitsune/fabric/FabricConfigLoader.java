@@ -9,10 +9,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
+/**
+ * Loads and persists Kitsune configuration as a Java properties file.
+ *
+ * <p>If the target file does not exist, the loader writes a file populated
+ * with default values before returning a validated configuration. Otherwise
+ * it reads the existing file, merging over the defaults so that missing keys
+ * fall back to their defaults.
+ */
 public final class FabricConfigLoader {
     private FabricConfigLoader() {
     }
 
+    /**
+     * Loads the configuration from the given path, creating default-valued
+     * file if absent.
+     *
+     * @param path properties file path
+     * @return validated configuration loaded from the file
+     * @throws IOException if the file cannot be read or written
+     */
     public static KitsuneConfig load(Path path) throws IOException {
         Properties properties = defaults();
         Files.createDirectories(path.toAbsolutePath().getParent());

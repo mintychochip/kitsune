@@ -15,6 +15,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/** Verifies provider creation, duplicate-id rejection, and built-in factory registration in {@link EmbeddingProviderCatalog}. */
 final class EmbeddingProviderCatalogTest {
     @Test
     void catalogCreatesProviderThroughRegisteredFactory() {
@@ -58,6 +59,7 @@ final class EmbeddingProviderCatalogTest {
         );
     }
 
+    /** Test factory whose provider id concatenates the factory id, model, and resolved credential. */
     private static final class DummyFactory implements EmbeddingProviderFactory {
         private final String id;
 
@@ -82,6 +84,7 @@ final class EmbeddingProviderCatalogTest {
         }
     }
 
+    /** Minimal {@link EmbeddingProvider} stub used to observe the factory-created id. */
     private static final class DummyProvider implements EmbeddingProvider {
         private final String id;
 

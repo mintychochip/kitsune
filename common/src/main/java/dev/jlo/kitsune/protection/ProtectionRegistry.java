@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/** Evaluates access to protected blocks using registered providers. */
 public final class ProtectionRegistry {
     private static final long RATE_LIMIT_NANOS = 60_000_000_000L;
 
@@ -17,19 +18,23 @@ public final class ProtectionRegistry {
     private final Logger logger;
     private final Map<String, Long> lastReportNanos = new ConcurrentHashMap<>();
 
+    /** Creates a registry using the default class logger. */
     public ProtectionRegistry(List<BlockAccessProvider> providers) {
         this(providers, Logger.getLogger(ProtectionRegistry.class.getName()));
     }
 
+    /** Creates a registry with the supplied providers and failure logger. */
     public ProtectionRegistry(List<BlockAccessProvider> providers, Logger logger) {
         this.providers = List.copyOf(Objects.requireNonNull(providers, "Providers must not be null"));
         this.logger = Objects.requireNonNull(logger, "Logger must not be null");
     }
 
+    /** Returns the immutable registered-provider list. */
     public List<BlockAccessProvider> providers() {
         return providers;
     }
 
+    /** Returns whether every provider permits the access context. */
     public boolean canAccess(AccessContext context) {
         Objects.requireNonNull(context, "Context must not be null");
         for (BlockAccessProvider provider : providers) {

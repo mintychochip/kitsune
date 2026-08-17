@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+/** Verifies Forge entrypoint and runtime adapter contracts. */
 class ForgeAdapterContractTest {
     @Test
     void exposesForgeEntrypointAndRuntimeAdapters() {

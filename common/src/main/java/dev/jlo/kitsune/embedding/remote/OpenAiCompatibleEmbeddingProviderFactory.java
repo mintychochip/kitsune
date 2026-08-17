@@ -6,6 +6,10 @@ import dev.jlo.kitsune.api.embedding.EmbeddingProviderFactory;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Factory creating {@link OpenAiCompatibleEmbeddingProvider} instances from
+ * settings maps.
+ */
 public final class OpenAiCompatibleEmbeddingProviderFactory implements EmbeddingProviderFactory {
     @Override
     public String id() {

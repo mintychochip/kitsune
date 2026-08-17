@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies bounded {@link ItemDescriptor} construction and bound-collision handling. */
 class ItemDescriptorBoundsTest {
 
     @Test

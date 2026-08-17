@@ -9,5 +9,11 @@ import dev.jlo.kitsune.model.ItemDescriptor;
  * builder state after the call returns.
  */
 public interface ItemFeatureProvider {
+    /**
+     * Contributes features into the descriptor being built.
+     *
+     * @param item       the neutral item being enriched
+     * @param descriptor target builder receiving the contribution
+     */
     void contribute(ItemDescriptor item, ItemDescriptor.Builder descriptor);
 }

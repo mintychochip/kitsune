@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 
 import static dev.jlo.kitsune.item.NestedItemWalkerTest.TestTree;
 
+/** Adapts test tree nodes to the traversal contract. */
 class TestTreeTraversalAdapter implements TraversalAdapter<TestTree> {
 
     @Override

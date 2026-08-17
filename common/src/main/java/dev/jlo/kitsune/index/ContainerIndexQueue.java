@@ -17,17 +17,37 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Per-tick work queue coordinating chunk and root indexing.
+ *
+ * <p>Tracks chunk generations, schedules chunk writes and root writes against a per-tick
+ * budget, and exposes readiness promises so callers can await a chunk reaching its final
+ * indexed state. All mutating operations are synchronized; writes are claimed through
+ * {@link #claimTick()} and afterwards reported via {@link #completeChunkWrite} and
+ * {@link #completeRootWrite}. The queue stops accepting work after {@link #stopAccepting()}.
+ */
 final class ContainerIndexQueue {
+    /** Cancels an already-scheduled timeout callback. */
     @FunctionalInterface
     interface TimeoutHandle {
+        /** Cancels the scheduled timeout, if it has not already fired. */
         void cancel();
     }
 
+    /** Schedules a timeout callback to run after a delay. */
     @FunctionalInterface
     interface TimeoutScheduler {
+        /**
+         * Schedules {@code timeout} to run after {@code delay}.
+         *
+         * @param delay the delay before the timeout fires
+         * @param timeout the callback to run
+         * @return a handle to cancel the scheduled timeout
+         */
         TimeoutHandle schedule(Duration delay, Runnable timeout);
     }
 
+    /** Identifies one claimed chunk write by chunk key and generation. */
     record ChunkWork(ChunkKey key, long generation) {
         ChunkWork {
             Objects.requireNonNull(key, "Chunk key must not be null");
@@ -37,6 +57,7 @@ final class ContainerIndexQueue {
         }
     }
 
+    /** Identifies one claimed root write by root key, operation, revision, and action. */
     record RootWork(
         BlockKey key,
         long operation,
@@ -55,6 +76,7 @@ final class ContainerIndexQueue {
         }
     }
 
+    /** Work claimed for one tick, split into chunk and root writes. */
     record TickBatch(List<ChunkWork> chunks, List<RootWork> roots) {
         TickBatch {
             chunks = List.copyOf(chunks);
@@ -95,10 +117,24 @@ final class ContainerIndexQueue {
     private long nextRootOperation;
     private boolean accepting = true;
 
+    /**
+     * Creates a queue with the default {@link CompletableFuture}-based timeout scheduler.
+     *
+     * @param chunksPerTick maximum chunk writes claimed per tick, positive
+     * @param rootsPerTick maximum root writes claimed per tick, positive
+     */
     ContainerIndexQueue(int chunksPerTick, int rootsPerTick) {
         this(chunksPerTick, rootsPerTick, DEFAULT_TIMEOUT_SCHEDULER);
     }
 
+    /**
+     * Creates a queue with a custom timeout scheduler.
+     *
+     * @param chunksPerTick maximum chunk writes claimed per tick, positive
+     * @param rootsPerTick maximum root writes claimed per tick, positive
+     * @param timeoutScheduler scheduler used for readiness timeouts, must not be null
+     * @throws IllegalArgumentException if either tick budget is not positive
+     */
     ContainerIndexQueue(
         int chunksPerTick,
         int rootsPerTick,
@@ -118,6 +154,12 @@ final class ContainerIndexQueue {
         );
     }
 
+    /**
+     * Stops the queue from accepting new work and fails all pending readiness waiters.
+     *
+     * <p>Subsequent enqueue and dirty-marking calls become no-ops and future calls to
+     * {@link #awaitReady} return a failed stage. Calling more than once has no further effect.
+     */
     synchronized void stopAccepting() {
         if (!accepting) return;
         accepting = false;
@@ -129,6 +171,12 @@ final class ContainerIndexQueue {
         }
     }
 
+    /**
+     * Enqueues work for a chunk, superseding any previously queued generation for the same key.
+     *
+     * @param key the chunk to enqueue, must not be null
+     * @return the newly-created generation ID, or {@code 0L} if the queue has stopped
+     */
     synchronized long enqueueChunk(ChunkKey key) {
         Objects.requireNonNull(key, "Chunk key must not be null");
         if (!accepting) {
@@ -152,6 +200,11 @@ final class ContainerIndexQueue {
         return generation.id;
     }
 
+    /**
+     * Marks a root as dirty, scheduling it for a snapshot write if not already in flight.
+     *
+     * @param key the root to mark dirty, must not be null
+     */
     synchronized void markDirty(BlockKey key) {
         Objects.requireNonNull(key, "Root key must not be null");
         if (!accepting) return;
@@ -165,6 +218,11 @@ final class ContainerIndexQueue {
         queueRoot(state);
     }
 
+    /**
+     * Schedules processing of an explicit pending root action for a root.
+     *
+     * @param pending the root action to schedule, must not be null
+     */
     synchronized void markRoot(PendingRoot pending) {
         Objects.requireNonNull(pending, "Pending root must not be null");
         if (!accepting) return;
@@ -185,6 +243,11 @@ final class ContainerIndexQueue {
         queueRoot(state);
     }
 
+    /**
+     * Re-queues a root write after a transient failure, preserving any replacement pending action.
+     *
+     * @param work the failed root work to retry, must not be null
+     */
     synchronized void retryRootWrite(RootWork work) {
         Objects.requireNonNull(work, "Root work must not be null");
         RootOperation operation = rootOperations.remove(work.operation());
@@ -208,6 +271,15 @@ final class ContainerIndexQueue {
         state.rerunRequested = false;
     }
 
+    /**
+     * Claims up to the configured per-tick budgets of chunk and root writes.
+     *
+     * <p>Prioritizes chunks with pending readiness waiters, then takes the remaining active
+     * chunks in order. Root writes are assigned fresh operation IDs against the current
+     * generation ceiling.
+     *
+     * @return the batch of work claimed for this tick
+     */
     synchronized TickBatch claimTick() {
         List<ChunkWork> chunkWork = new ArrayList<>(chunksPerTick);
         List<RootWork> rootWork = new ArrayList<>(rootsPerTick);
@@ -256,6 +328,12 @@ final class ContainerIndexQueue {
         return new TickBatch(chunkWork, rootWork);
     }
 
+    /**
+     * Records the root keys discovered while writing a chunk.
+     *
+     * @param work the chunk write that discovered the roots
+     * @param discoveredRoots roots discovered during the write, must not be null
+     */
     synchronized void discovered(
         ChunkWork work,
         List<BlockKey> discoveredRoots
@@ -286,6 +364,12 @@ final class ContainerIndexQueue {
         attemptReady(generation);
     }
 
+    /**
+     * Marks a chunk write as complete, failing the generation if the write failed.
+     *
+     * @param work the completed chunk write
+     * @param failure the write failure, or {@code null} on success
+     */
     synchronized void completeChunkWrite(
         ChunkWork work,
         Throwable failure
@@ -301,6 +385,13 @@ final class ContainerIndexQueue {
         attemptReady(generation);
     }
 
+    /**
+     * Marks a root write as complete, releasing any related chunk generations from their
+     * pending roots and re-queueing the root if further work remains.
+     *
+     * @param work the completed root write
+     * @param failure the write failure, or {@code null} on success
+     */
     synchronized void completeRootWrite(
         RootWork work,
         Throwable failure
@@ -336,6 +427,19 @@ final class ContainerIndexQueue {
         }
     }
 
+    /**
+     * Returns a stage completing when all listed chunks become ready or timing out.
+     *
+     * <p>Waits for the current generation of each key to reach its fully-indexed state. If a
+     * generation has already failed, the returned stage completes exceptionally. If the queue
+     * has stopped, the stage fails immediately.
+     *
+     * @param keys chunks to await readiness for, must be non-empty
+     * @param timeout maximum wait duration, must be positive
+     * @return a stage completing on readiness or failing on failure, timeout, or stop
+     * @throws IllegalArgumentException if {@code keys} is empty or {@code timeout} is
+     *         zero or negative
+     */
     synchronized CompletionStage<Void> awaitReady(
         Set<ChunkKey> keys,
         Duration timeout
@@ -380,12 +484,23 @@ final class ContainerIndexQueue {
         return waiter.future;
     }
 
+    /**
+     * Reports whether the current generation of a chunk has reached the ready state.
+     *
+     * @param key the chunk to check, must not be null
+     * @return {@code true} if a current generation exists and is ready
+     */
     synchronized boolean isReady(ChunkKey key) {
         Objects.requireNonNull(key, "Chunk key must not be null");
         ChunkGeneration generation = currentChunks.get(key);
         return generation != null && generation.ready;
     }
 
+    /**
+     * Removes a chunk from the queue, failing its current generation with an unload error.
+     *
+     * @param key the chunk to unload, must not be null
+     */
     synchronized void unload(ChunkKey key) {
         Objects.requireNonNull(key, "Chunk key must not be null");
         ChunkGeneration generation = currentChunks.remove(key);
@@ -397,10 +512,12 @@ final class ContainerIndexQueue {
         }
     }
 
+    /** Returns the number of chunk generations currently awaiting a write. */
     synchronized int pendingChunkCount() {
         return chunkQueue.size();
     }
 
+    /** Returns the number of roots currently awaiting a write. */
     synchronized int pendingRootCount() {
         return rootQueue.size();
     }

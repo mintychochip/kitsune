@@ -42,6 +42,11 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Owns and coordinates the full Kitsune runtime on NeoForge: configuration,
+ * embedding, indexing, world access, search, sessions, and event listeners,
+ * plus lazy index scanning driven by server ticks.
+ */
 public final class NeoForgeRuntime implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("Kitsune");
 
@@ -67,6 +72,14 @@ public final class NeoForgeRuntime implements AutoCloseable {
     private CompletableFuture<Void> indexReady;
     private long ticks;
 
+    /**
+     * Initializes and starts the runtime against the given server: loads config,
+     * selects the embedding provider, opens the index repository and worker,
+     * builds world access and search components, registers listeners, and queues
+     * an initial scan. Idempotent; on failure closes partial state and rethrows.
+     *
+     * @param server server the runtime is bound to
+     */
     public void start(MinecraftServer server) {
         Objects.requireNonNull(server, "Server must not be null");
         if (!started.compareAndSet(false, true)) return;
@@ -125,15 +138,33 @@ public final class NeoForgeRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Registers the kitsune commands on the given dispatcher exactly once; later
+     * calls are no-ops.
+     *
+     * @param dispatcher dispatcher to register commands on
+     */
     public void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         Objects.requireNonNull(dispatcher, "Dispatcher must not be null");
         if (commandRegistered.compareAndSet(false, true)) NeoForgeCommand.register(dispatcher, this);
     }
 
+    /**
+     * Sends the {@code /kitsune} usage message to the command source.
+     *
+     * @param source command source to notify
+     */
     public void sendUsage(CommandSourceStack source) {
         source.sendFailure(Component.literal("Usage: /kitsune [--verbose] <query>"));
     }
 
+    /**
+     * Parses and runs a search for the invoking player, delivering the result
+     * back to the command source on the server thread.
+     *
+     * @param source command source invoking the search
+     * @param rawQuery raw query text
+     */
     public void executeSearch(CommandSourceStack source, String rawQuery) {
         if (closed.get() || searchService == null || sessions == null) {
             source.sendFailure(Component.literal("Search is currently unavailable."));
@@ -174,16 +205,28 @@ public final class NeoForgeRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Queues a scan of loaded containers to run on the next server tick.
+     */
     public void requestScan() {
         scanQueued.set(true);
     }
 
+    /**
+     * Advances the tick counter and triggers a scan when one is queued or the
+     * reconciliation interval has elapsed; no-op once closed or not configured.
+     */
     public void onServerTick() {
         if (closed.get() || config == null) return;
         ticks++;
         if (scanQueued.getAndSet(false) || ticks % config.reconciliationPeriodTicks() == 0) scanAndSubmit();
     }
 
+    /**
+     * Closes the runtime exactly once, stopping event listeners, clearing
+     * sessions, closing the index worker (or repository when no worker exists),
+     * and releasing held components.
+     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) return;

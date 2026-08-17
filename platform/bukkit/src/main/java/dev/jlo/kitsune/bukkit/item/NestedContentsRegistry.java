@@ -4,6 +4,9 @@ import java.util.List;
 
 import org.bukkit.Server;
 
+/**
+ * Registry of built-in nested content providers for Bukkit item types.
+ */
 final class NestedContentsRegistry {
     private static final List<BukkitNestedContentsProvider> BUILT_IN_PROVIDERS = List.of(
         new ShulkerContentsProvider(),

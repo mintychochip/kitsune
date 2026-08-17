@@ -12,7 +12,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/** Runs index operations on a dedicated worker executor. */
 public final class IndexWorker implements AutoCloseable {
+    /** Supplies a value while permitting checked failures. */
     @FunctionalInterface
     public interface CheckedSupplier<T> {
         T get() throws Exception;
@@ -26,10 +28,12 @@ public final class IndexWorker implements AutoCloseable {
     private CompletableFuture<Void> closeDone;
     private boolean repositoryCloseStarted;
 
+    /** Creates a worker backed by the supplied repository. */
     public IndexWorker(IndexRepository repository) {
         this.repository = Objects.requireNonNull(repository, "Repository");
     }
 
+    /** Submits an operation and completes a future with its result or failure. */
     public <T> CompletableFuture<T> submit(CheckedSupplier<T> operation) {
         Objects.requireNonNull(operation, "Operation");
         CompletableFuture<T> future = new CompletableFuture<>();
@@ -62,6 +66,7 @@ public final class IndexWorker implements AutoCloseable {
         return future;
     }
 
+    /** Stops the worker, waiting for its default shutdown timeout. */
     @Override
     public void close() throws Exception {
         close(5, TimeUnit.SECONDS);

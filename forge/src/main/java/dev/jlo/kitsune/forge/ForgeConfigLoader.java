@@ -9,10 +9,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
+/**
+ * Loads Kitsune configuration from a {@code .properties} file, creating a default file when absent.
+ */
 public final class ForgeConfigLoader {
     private ForgeConfigLoader() {
     }
 
+    /**
+     * Reads the properties file at {@code path}, creating it with defaults when it does not yet
+     * exist, and builds a validated {@link KitsuneConfig}.
+     *
+     * @param path file containing the configuration properties
+     * @return config built from the file's values and defaults
+     * @throws IOException when the file cannot be read or written
+     * @throws IllegalArgumentException when a required key is missing or a value is malformed
+     */
     public static KitsuneConfig load(Path path) throws IOException {
         Properties properties = defaults();
         Files.createDirectories(path.toAbsolutePath().getParent());

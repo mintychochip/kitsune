@@ -17,7 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies how {@link BukkitSessionScheduler} maps durations onto whole
+ * server ticks and rejects invalid durations.
+ */
 class BukkitSessionSchedulerTest {
+    /**
+     * Positive durations round up to whole server ticks, and cancelling the
+     * resulting task reaches the Bukkit scheduler.
+     */
     @Test
     void roundsPositiveDurationsUpToWholeServerTicks() {
         SchedulerHarness harness = SchedulerHarness.create();
@@ -37,6 +45,9 @@ class BukkitSessionSchedulerTest {
         assertEquals(1, harness.cancelCalls().get());
     }
 
+    /**
+     * Zero and negative durations are rejected.
+     */
     @Test
     void rejectsNonPositiveDurations() {
         BukkitSessionScheduler scheduler = SchedulerHarness.create().scheduler();
@@ -46,6 +57,10 @@ class BukkitSessionSchedulerTest {
             () -> scheduler.schedule(Duration.ofNanos(-1), () -> { }));
     }
 
+    /**
+     * A scheduler wiring fakes over a Bukkit server, plugin, and scheduler to
+     * observe delays, scheduled actions, and cancellations.
+     */
     private record SchedulerHarness(
         BukkitSessionScheduler scheduler,
         AtomicLong delayTicks,

@@ -11,6 +11,9 @@ import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Verifies sparse tag embedding generation for item descriptors.
+ */
 class SparseTagEmbeddingProviderTest {
 
     private final SparseTagEmbeddingProvider provider = new SparseTagEmbeddingProvider();

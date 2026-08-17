@@ -12,6 +12,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies {@link EmbeddingRegistry} provider ordering, duplicate/null rejection, and selection validation. */
 class EmbeddingRegistryTest {
 
     @Test
@@ -42,6 +43,7 @@ class EmbeddingRegistryTest {
             () -> new EmbeddingRegistry(new ArrayList<>(), "missing"));
     }
 
+    /** Test {@link EmbeddingProvider} stub that records its id and version without producing real vectors. */
     private static class DummyProvider implements EmbeddingProvider {
         private final String id;
         private final int version;

@@ -2,6 +2,16 @@ package dev.jlo.kitsune.model;
 
 import java.util.*;
 
+/**
+ * An immutable, neutral description of an item used for indexing and
+ * search.
+ *
+ * <p>Collection values are normalized, deduplicated, sorted, and exposed as
+ * unmodifiable views. Bounded construction truncates values to configured
+ * entry and code-point limits.
+ *
+ * @see Builder
+ */
 public final class ItemDescriptor {
     private final String materialKey;
     private final int amount;
@@ -25,16 +35,28 @@ public final class ItemDescriptor {
         this.customTags = boundedSet(builder.customTags, bounds);
     }
 
+    /** @return the material identifier of the item */
     public String materialKey() { return materialKey; }
+    /** @return the stack amount of the item */
     public int amount() { return amount; }
+    /** @return display text lines, sorted and unmodifiable */
     public List<String> displayText() { return displayText; }
+    /** @return lore lines, sorted and unmodifiable */
     public List<String> lore() { return lore; }
+    /** @return enchantment keys mapped to levels, unmodifiable */
     public Map<String, Integer> enchantments() { return enchantments; }
+    /** @return attribute keys mapped to values, unmodifiable */
     public Map<String, Double> attributes() { return attributes; }
+    /** @return trait tags, sorted and unmodifiable */
     public Set<String> traits() { return traits; }
+    /** @return scalar metadata keys mapped to values, unmodifiable */
     public Map<String, String> scalarMetadata() { return scalarMetadata; }
+    /** @return custom tags, sorted and unmodifiable */
     public Set<String> customTags() { return customTags; }
 
+    /**
+     * @return a new builder for an {@link ItemDescriptor}
+     */
     public static Builder builder() {
         return new Builder();
     }
@@ -170,6 +192,12 @@ public final class ItemDescriptor {
         }
     }
 
+    /**
+     * Builds {@link ItemDescriptor} instances.
+     *
+     * <p>Required fields are the material key and a positive amount; these are
+     * validated at the end of every build, and per-method where applicable.
+     */
     public static final class Builder {
         private String materialKey;
         private int amount;
@@ -181,6 +209,13 @@ public final class ItemDescriptor {
         private final Map<String, String> scalarMetadata = new LinkedHashMap<>();
         private final Set<String> customTags = new LinkedHashSet<>();
 
+        /**
+         * Sets the material identifier.
+         *
+         * @param materialKey material identifier
+         * @return this builder
+         * @throws IllegalArgumentException if the key is null or blank
+         */
         public Builder materialKey(String materialKey) {
             if (materialKey == null || materialKey.isBlank()) {
                 throw new IllegalArgumentException("Material key must not be blank");
@@ -189,12 +224,25 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Sets the stack amount.
+         *
+         * @param amount stack amount
+         * @return this builder
+         * @throws IllegalArgumentException if the amount is not positive
+         */
         public Builder amount(int amount) {
             if (amount <= 0) throw new IllegalArgumentException("Amount must be positive");
             this.amount = amount;
             return this;
         }
 
+        /**
+         * Adds a display text line.
+         *
+         * @param text line to add
+         * @return this builder
+         */
         public Builder addDisplayText(String text) {
             if (text == null || text.isBlank()) {
                 throw new IllegalArgumentException("Display text must not be blank");
@@ -203,6 +251,12 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds a lore line.
+         *
+         * @param text line to add
+         * @return this builder
+         */
         public Builder addLore(String text) {
             if (text == null || text.isBlank()) {
                 throw new IllegalArgumentException("Lore must not be blank");
@@ -211,6 +265,13 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds an enchantment with the given level.
+         *
+         * @param key   enchantment key
+         * @param level enchantment level
+         * @return this builder
+         */
         public Builder addEnchantment(String key, int level) {
             if (key == null || key.isBlank()) {
                 throw new IllegalArgumentException("Enchantment key must not be blank");
@@ -220,6 +281,13 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds an attribute with the given value.
+         *
+         * @param key   attribute key
+         * @param value attribute value
+         * @return this builder
+         */
         public Builder addAttribute(String key, double value) {
             if (key == null || key.isBlank()) {
                 throw new IllegalArgumentException("Attribute key must not be blank");
@@ -231,6 +299,12 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds a trait tag.
+         *
+         * @param trait trait to add
+         * @return this builder
+         */
         public Builder addTrait(String trait) {
             if (trait == null || trait.isBlank()) {
                 throw new IllegalArgumentException("Trait must not be blank");
@@ -239,6 +313,13 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds a scalar metadata entry.
+         *
+         * @param key   metadata key
+         * @param value metadata value
+         * @return this builder
+         */
         public Builder addScalarMetadata(String key, String value) {
             if (key == null || key.isBlank()) {
                 throw new IllegalArgumentException("Metadata key must not be blank");
@@ -250,6 +331,12 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Adds a custom tag.
+         *
+         * @param tag tag to add
+         * @return this builder
+         */
         public Builder addCustomTag(String tag) {
             if (tag == null || tag.isBlank()) {
                 throw new IllegalArgumentException("Custom tag must not be blank");
@@ -258,11 +345,27 @@ public final class ItemDescriptor {
             return this;
         }
 
+        /**
+         * Builds an unbounded descriptor.
+         *
+         * @return the built descriptor
+         * @throws IllegalArgumentException if required fields are missing
+         */
         public ItemDescriptor build() {
             validateRequiredFields();
             return new ItemDescriptor(this, null);
         }
 
+        /**
+         * Builds a descriptor bounded to the given entry and code-point
+         * limits.
+         *
+         * @param maximumEntries     maximum collection entries retained
+         * @param maximumCodePoints  maximum code points per text value
+         * @return the built descriptor
+         * @throws IllegalArgumentException if required fields are missing or a
+         *         bound is not positive
+         */
         public ItemDescriptor buildBounded(int maximumEntries, int maximumCodePoints) {
             validateRequiredFields();
             return new ItemDescriptor(

@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies walker behavior for malformed, repeated, and bounded trees. */
 class NestedItemWalkerInvariantsTest {
 
+    /** Represents a child node at a slot in a test tree. */
     record TestChild(int slot, TestTree node) {
         TestChild {
             if (slot < 0) throw new IllegalArgumentException("Slot must not be negative");
@@ -23,6 +25,7 @@ class NestedItemWalkerInvariantsTest {
         }
     }
 
+    /** Minimal tree node used to exercise traversal edge cases. */
     static final class TestTree {
         final String label;
         final int amount = 1;
@@ -77,6 +80,7 @@ class NestedItemWalkerInvariantsTest {
         }
     }
 
+    /** Adapts test trees to the generic traversal interface. */
     static class TypedAdapter implements TraversalAdapter<TestTree> {
         @Override
         public ItemDescriptor describe(TestTree node) {

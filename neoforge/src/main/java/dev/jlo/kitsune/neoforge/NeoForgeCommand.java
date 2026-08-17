@@ -9,10 +9,20 @@ import java.util.Objects;
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
+/**
+ * Registers the {@code /kitsune} Brigadier command tree with a dispatcher.
+ */
 public final class NeoForgeCommand {
     private NeoForgeCommand() {
     }
 
+    /**
+     * Registers the {@code /kitsune} command: a bare invocation sends usage,
+     * and a greedy {@code query} argument performs a search.
+     *
+     * @param dispatcher dispatcher to register the command on
+     * @param runtime runtime that handles command execution
+     */
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, NeoForgeRuntime runtime) {
         Objects.requireNonNull(dispatcher, "Dispatcher must not be null");
         Objects.requireNonNull(runtime, "Runtime must not be null");

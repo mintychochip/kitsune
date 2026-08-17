@@ -27,8 +27,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Exercises the bootstrap lifecycle and repository-close threading behaviour
+ * of the Bukkit runtime bridge.
+ */
 class BukkitRuntimeLifecycleTest {
 
+    /**
+     * A lifecycle that has been stopped no longer accepts the generation
+     * issued before that stop.
+     */
     @Test
     void bootstrapLifecycleRejectsStaleCompletionsAfterStop() {
         BukkitRuntime.BootstrapLifecycle lifecycle = new BukkitRuntime.BootstrapLifecycle();
@@ -39,6 +47,10 @@ class BukkitRuntimeLifecycleTest {
         assertTrue(lifecycle.isStopping());
     }
 
+    /**
+     * Calling {@code begin} again after a stop issues a fresh generation that
+     * supersedes the previously stopped one.
+     */
     @Test
     void bootstrapLifecycleResetsAfterBeginFollowingStop() {
         BukkitRuntime.BootstrapLifecycle lifecycle = new BukkitRuntime.BootstrapLifecycle();
@@ -51,6 +63,10 @@ class BukkitRuntimeLifecycleTest {
         assertFalse(lifecycle.isStopping());
     }
 
+    /**
+     * Concurrent completions issued against a stopped generation never advance
+     * the lifecycle, and a subsequent begin resets it for new work.
+     */
     @Test
     void concurrentStaleCompletionsDoNotAdvanceFuture() throws Exception {
         BukkitRuntime.BootstrapLifecycle lifecycle =
@@ -80,6 +96,10 @@ class BukkitRuntimeLifecycleTest {
         assertTrue(lifecycle.isCurrent(next));
     }
 
+    /**
+     * Closing the repository runs on the dedicated {@code kitsune-close} thread
+     * rather than the calling thread.
+     */
     @Test
     void repositoryCloseRunsOnDedicatedThread() throws Exception {
         AtomicReference<String> closeThread = new AtomicReference<>();

@@ -9,10 +9,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
+/**
+ * Loads and validates Kitsune configuration from a properties file, creating
+ * the file with defaults when absent.
+ */
 public final class NeoForgeConfigLoader {
     private NeoForgeConfigLoader() {
     }
 
+    /**
+     * Reads Kitsune configuration from the given path, creating the parent
+     * directory and a default-populated properties file when it does not exist.
+     *
+     * @param path configuration file path
+     * @return validated Kitsune configuration
+     * @throws IOException on file-access failure
+     */
     public static KitsuneConfig load(Path path) throws IOException {
         Properties properties = defaults();
         Files.createDirectories(path.toAbsolutePath().getParent());

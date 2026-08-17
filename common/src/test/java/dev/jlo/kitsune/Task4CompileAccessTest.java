@@ -14,6 +14,7 @@ import java.sql.Statement;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Verifies the repository {@code open()} path is publicly accessible and migrates to the expected schema. */
 class Task4CompileAccessTest {
     @Test
     void publicOpenIsAccessibleFromOtherPackage(@TempDir Path tempDir) throws Exception {

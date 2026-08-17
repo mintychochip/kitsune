@@ -3,12 +3,14 @@ package dev.jlo.kitsune.search;
 import java.util.List;
 import java.util.Objects;
 
+/** Represents the status and results of a search operation. */
 public record SearchOutcome(
     Status status,
     List<RootMatch> roots,
     int totalAccessibleMatchingRoots,
     int totalAccessibleMatchingStacks
 ) {
+    /** Terminal states reported by a search. */
     public enum Status {
         SUCCESS,
         NO_MATCHES,
@@ -18,6 +20,7 @@ public record SearchOutcome(
         FAILURE
     }
 
+    /** Validates outcome counts and defensively copies roots. */
     public SearchOutcome {
         Objects.requireNonNull(status, "Status must not be null");
         roots = List.copyOf(Objects.requireNonNull(roots, "Roots must not be null"));
@@ -49,6 +52,7 @@ public record SearchOutcome(
         }
     }
 
+    /** Creates a successful outcome with ranked roots and aggregate counts. */
     public static SearchOutcome success(
         List<RootMatch> roots,
         int totalAccessibleMatchingRoots,
@@ -62,22 +66,27 @@ public record SearchOutcome(
         );
     }
 
+    /** Creates an outcome indicating that no matches were found. */
     public static SearchOutcome noMatches() {
         return empty(Status.NO_MATCHES);
     }
 
+    /** Creates an outcome indicating that the search was canceled. */
     public static SearchOutcome canceled() {
         return empty(Status.CANCELED);
     }
 
+    /** Creates an outcome indicating that the query is unsupported. */
     public static SearchOutcome unsupportedQuery() {
         return empty(Status.UNSUPPORTED_QUERY);
     }
 
+    /** Creates an outcome indicating that the index is still warming. */
     public static SearchOutcome indexWarming() {
         return empty(Status.INDEX_WARMING);
     }
 
+    /** Creates an outcome indicating that the search failed. */
     public static SearchOutcome failure() {
         return empty(Status.FAILURE);
     }

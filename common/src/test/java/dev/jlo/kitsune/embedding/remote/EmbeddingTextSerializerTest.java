@@ -7,7 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies deterministic descriptor and query text serialization.
+ */
 final class EmbeddingTextSerializerTest {
+    /** Ensures canonical descriptor fields are serialized independently of incidental values. */
     @Test
     void serializesCanonicalDescriptorFieldsDeterministically() {
         ItemDescriptor first = descriptor(false);
@@ -23,6 +27,7 @@ final class EmbeddingTextSerializerTest {
         assertFalse(firstText.contains("amount"));
     }
 
+    /** Ensures query whitespace is normalized without introducing aliases. */
     @Test
     void normalizesQueryWhitespaceWithoutAddingAliases() {
         assertEquals(
@@ -31,6 +36,7 @@ final class EmbeddingTextSerializerTest {
         );
     }
 
+    /** Builds a descriptor whose semantic fields remain stable while incidental values vary. */
     private static ItemDescriptor descriptor(boolean reverseOrder) {
         ItemDescriptor.Builder builder = ItemDescriptor.builder()
             .materialKey("minecraft:diamond_pickaxe")

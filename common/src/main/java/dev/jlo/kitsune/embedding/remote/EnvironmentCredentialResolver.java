@@ -6,13 +6,27 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
+/**
+ * Resolves credential references of the form {@code env:&lt;NAME&gt;} from an
+ * environment lookup.
+ */
 public final class EnvironmentCredentialResolver implements EmbeddingCredentialResolver {
     private final Function<String, String> environment;
 
+    /**
+     * Creates a resolver backed by the process environment.
+     */
     public EnvironmentCredentialResolver() {
         this(System::getenv);
     }
 
+    /**
+     * Creates a resolver backed by the given environment lookup.
+     *
+     * @param environment function mapping an environment variable name to its
+     *                    value, or {@code null} when unset
+     * @throws NullPointerException if the lookup is null
+     */
     public EnvironmentCredentialResolver(Function<String, String> environment) {
         this.environment = Objects.requireNonNull(environment, "Environment lookup must not be null");
     }

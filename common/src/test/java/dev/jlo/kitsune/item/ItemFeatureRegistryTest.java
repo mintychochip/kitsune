@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies transactional and append-only item feature contributions. */
 class ItemFeatureRegistryTest {
 
+    /** Leaves the baseline builder unchanged when a contribution fails. */
     @Test
     void failingConsumerDoesNotMutateBaseline() {
         ItemDescriptor.Builder baseline = ItemDescriptor.builder()
@@ -41,6 +43,7 @@ class ItemFeatureRegistryTest {
         assertFalse(descriptor.customTags().contains("attempted"));
     }
 
+    /** Preserves keyed baseline entries while appending new contributions. */
     @Test
     void successfulConsumerCannotReplaceBaselineKeyedEntries() {
         ItemDescriptor.Builder baseline = ItemDescriptor.builder()

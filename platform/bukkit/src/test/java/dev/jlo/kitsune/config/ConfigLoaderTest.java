@@ -5,7 +5,14 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Verifies the loading surface and validation behaviour of
+ * {@link ConfigLoader}.
+ */
 class ConfigLoaderTest {
+    /**
+     * The public {@code load} method accepts a {@code JavaPlugin} argument.
+     */
     @Test
     void publicLoadAcceptsJavaPlugin() throws Exception {
         Method m = ConfigLoader.class.getMethod("load", org.bukkit.plugin.java.JavaPlugin.class);
@@ -13,6 +20,9 @@ class ConfigLoaderTest {
         assertEquals(org.bukkit.plugin.java.JavaPlugin.class, m.getParameterTypes()[0]);
     }
 
+    /**
+     * A well-formed configuration is loaded into the expected settings.
+     */
     @Test
     void loadsValidConfiguration() {
         MemoryConfiguration cfg = new MemoryConfiguration();
@@ -35,6 +45,9 @@ class ConfigLoaderTest {
         assertEquals(4, loaded.maximumDepth());
     }
 
+    /**
+     * A search radius above the configured maximum is rejected.
+     */
     @Test
     void propagatesInvalidSearchRadius() {
         MemoryConfiguration cfg = new MemoryConfiguration();
@@ -56,6 +69,9 @@ class ConfigLoaderTest {
         assertEquals("Invalid search radius", ex.getMessage());
     }
 
+    /**
+     * A blank embedding provider value is rejected.
+     */
     @Test
     void rejectsBlankEmbeddingProvider() {
         MemoryConfiguration cfg = new MemoryConfiguration();
@@ -77,6 +93,9 @@ class ConfigLoaderTest {
         assertEquals("Invalid embedding provider", ex.getMessage());
     }
 
+    /**
+     * A configuration missing the minimum score is rejected.
+     */
     @Test
     void rejectsMissingMinimumScore() {
         MemoryConfiguration cfg = new MemoryConfiguration();
@@ -97,6 +116,9 @@ class ConfigLoaderTest {
         assertEquals("Invalid minimum score", ex.getMessage());
     }
 
+    /**
+     * A non-numeric minimum score value is rejected.
+     */
     @Test
     void rejectsNonNumericMinimumScore() {
         MemoryConfiguration cfg = new MemoryConfiguration();

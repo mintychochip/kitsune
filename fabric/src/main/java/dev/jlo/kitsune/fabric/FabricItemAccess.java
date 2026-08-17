@@ -27,17 +27,39 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Fabric {@link TraversalAdapter} that describes, fingerprints, and expands
+ * {@link ItemStack} instances for indexing and nested-item traversal.
+ */
 public final class FabricItemAccess implements TraversalAdapter<ItemStack> {
     private final RegistryWrapper.WrapperLookup registryLookup;
 
+    /**
+     * Creates an access adapter without a registry lookup; nested NBT item
+     * children are not expanded.
+     */
     public FabricItemAccess() {
         this(null);
     }
 
+    /**
+     * Creates an access adapter using the supplied registry lookup for
+     * decoding nested NBT item children.
+     *
+     * @param registryLookup registry lookup, or {@code null} to disable NBT
+     *                       child expansion
+     */
     public FabricItemAccess(RegistryWrapper.WrapperLookup registryLookup) {
         this.registryLookup = registryLookup;
     }
 
+    /**
+     * Builds a textual descriptor from an item stack's material, amount,
+     * name, lore, enchantments, rarity, damage, custom data, and traits.
+     *
+     * @param stack item stack to describe; must not be empty
+     * @return descriptor for the stack
+     */
     @Override
     public ItemDescriptor describe(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -79,6 +101,13 @@ public final class FabricItemAccess implements TraversalAdapter<ItemStack> {
         return descriptor.build();
     }
 
+    /**
+     * Computes a SHA-256 fingerprint of the item stack's string
+     * representation.
+     *
+     * @param stack item stack to fingerprint; must not be null
+     * @return 32-byte fingerprint
+     */
     @Override
     public byte[] fingerprint(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -90,6 +119,14 @@ public final class FabricItemAccess implements TraversalAdapter<ItemStack> {
         }
     }
 
+    /**
+     * Expands a non-empty stack's nested contents (bundles, containers, and
+     * custom-data item lists) into traversable children. When no registry
+     * lookup is configured, only bundle and container children are returned.
+     *
+     * @param stack item stack to expand; must not be null
+     * @return immutable list of nested item children, sorted by slot
+     */
     @Override
     public List<TraversalChild<ItemStack>> children(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");

@@ -12,6 +12,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Verifies protection decision precedence and fail-closed handling. */
 class ProtectionRegistryTest {
     private static final AccessContext CONTEXT = new AccessContext(
         UUID.fromString("00000000-0000-0000-0000-000000000010"),

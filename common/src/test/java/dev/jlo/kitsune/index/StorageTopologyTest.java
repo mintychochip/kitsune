@@ -8,10 +8,12 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/** Verifies the roots rescanned after storage-block mutations. */
 class StorageTopologyTest {
     private static final UUID WORLD_ID =
         UUID.fromString("00000000-0000-0000-0000-000000000001");
 
+    /** Includes the changed root and each horizontally adjacent root. */
     @Test
     void mutationRescansTheChangedBlockAndHorizontalNeighbors() {
         BlockKey changed = new BlockKey(WORLD_ID, 4, 64, -2);
@@ -28,6 +30,7 @@ class StorageTopologyTest {
         );
     }
 
+    /** Omits neighbors whose coordinate arithmetic would overflow. */
     @Test
     void coordinateOverflowDoesNotWrapToAnUnrelatedRoot() {
         BlockKey changed = new BlockKey(

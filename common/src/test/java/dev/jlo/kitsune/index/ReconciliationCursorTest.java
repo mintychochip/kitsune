@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies lexicographic slicing, immutability, and completion of the reconciliation cursor.
+ */
 class ReconciliationCursorTest {
 
     private static final UUID WORLD_ID = new UUID(0L, 1L);

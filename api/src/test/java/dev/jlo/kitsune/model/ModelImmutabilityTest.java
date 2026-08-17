@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import dev.jlo.kitsune.api.embedding.Embedding;
 
+/** Verifies immutability, defensive copying, validation, and structural equality of the model types. */
 class ModelImmutabilityTest {
 
     @Test
@@ -182,6 +183,7 @@ class ModelImmutabilityTest {
         var ck = key.chunkKey();
         assertEquals(key.worldId(), ck.worldId());
     }
+    /** Minimal in-memory {@link Embedding} for exercising model types without a real provider. */
     private record TestEmbedding(String providerId, int providerVersion, Map<String, Double> values)
         implements Embedding {
         private static TestEmbedding of(String providerId, int providerVersion, Map<String, Double> values) {

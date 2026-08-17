@@ -26,7 +26,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+/** Verifies semantic deduplication and persistence reuse in {@link CachedEmbeddingResolver}. */
 class CachedEmbeddingResolverTest {
+    /** Ensures duplicate semantic descriptors are embedded only once per batch. */
     @Test
     void identicalSemanticStacksEmbedOnce() throws Exception {
         CountingProvider provider = new CountingProvider();
@@ -46,6 +48,7 @@ class CachedEmbeddingResolverTest {
         assertSame(items.get(0).embedding(), items.get(1).embedding());
     }
 
+    /** Ensures a later resolution reuses vectors persisted by an earlier resolution. */
     @Test
     void secondResolveReusesPersistedVectors() throws Exception {
         CountingProvider provider = new CountingProvider();

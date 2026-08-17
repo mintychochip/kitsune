@@ -15,7 +15,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+/** Resolves item embeddings from the repository cache, computing missing vectors in batches. */
 public final class CachedEmbeddingResolver {
+    /** Resolves drafts using cached embeddings and stores any newly computed vectors.
+     *
+     * @param drafts item drafts to resolve
+     * @param provider embedding provider
+     * @param repository persistence backing the cache
+     * @return indexed items in draft order
+     * @throws SQLException if the repository cannot access its storage
+     */
     public List<IndexedItem> resolve(
             List<ItemDraft> drafts,
             EmbeddingProvider provider,

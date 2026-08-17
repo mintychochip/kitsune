@@ -6,6 +6,13 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
 
+/**
+ * A dense (float-vector) embedding produced by an embedding provider.
+ *
+ * <p>Encodes the provider identity plus an immutable, finite component vector whose L2 norm
+ * is computed eagerly and used for cosine similarity. Instances can be serialized with
+ * {@link #encode()} and restored with {@link #decode}.
+ */
 public final class DenseEmbedding implements Embedding {
     private static final int MAGIC = 0x4B445631;
     private static final int MAX_DIMENSIONS = 16_384;
@@ -17,6 +24,16 @@ public final class DenseEmbedding implements Embedding {
     private final float[] components;
     private final double norm;
 
+    /**
+     * Creates a dense embedding, cloning and validating the given components.
+     *
+     * @param providerId non-blank identifier of the producing provider
+     * @param providerVersion version of the producing provider, non-negative
+     * @param components finite float vector with size in {@code [1, 16384]}
+     * @throws IllegalArgumentException if the provider ID is blank, the version is negative,
+     *         the vector is empty, oversized, or contains a non-finite value, or the norm
+     *         computation overflows
+     */
     public DenseEmbedding(String providerId, int providerVersion, float[] components) {
         if (providerId == null || providerId.isBlank()) {
             throw new IllegalArgumentException("Provider ID must not be blank");
@@ -61,6 +78,12 @@ public final class DenseEmbedding implements Embedding {
         return norm;
     }
 
+    /**
+     * Serializes this embedding to a binary payload: a magic header, the component count,
+     * then the raw float components in order.
+     *
+     * @return compact binary encoding of this embedding
+     */
     @Override
     public byte[] encode() {
         ByteBuffer buffer = ByteBuffer.allocate(HEADER_BYTES + components.length * Float.BYTES);
@@ -72,6 +95,18 @@ public final class DenseEmbedding implements Embedding {
         return buffer.array();
     }
 
+    /**
+     * Restores a dense embedding from the payload produced by {@link #encode()}.
+     *
+     * @param providerId non-blank identifier of the producing provider
+     * @param providerVersion version of the producing provider
+     * @param payload binary payload, must begin with the expected magic and match the
+     *        declared dimension count exactly
+     * @param expectedNorm the norm the restored embedding must match
+     * @return the decoded embedding
+     * @throws IllegalArgumentException if the payload is malformed, the norm is invalid or
+     *         mismatched, or the payload size is out of range
+     */
     public static DenseEmbedding decode(
         String providerId,
         int providerVersion,
@@ -118,6 +153,17 @@ public final class DenseEmbedding implements Embedding {
         }
     }
 
+    /**
+     * Computes cosine similarity with another embedding.
+     *
+     * <p>Requires the other embedding to be a {@link DenseEmbedding} of the same provider and
+     * version with an identical dimension count. Returns {@code 0.0} if either embedding has
+     * a zero norm; otherwise returns the similarity clamped to {@code [-1.0, 1.0]}.
+     *
+     * @param other the embedding to compare against, must not be null
+     * @return cosine similarity in {@code [0.0, 1.0]}
+     * @throws IllegalArgumentException on provider, version, type, or dimension mismatch
+     */
     @Override
     public double cosine(Embedding other) {
         Objects.requireNonNull(other, "Other must not be null");
@@ -145,6 +191,7 @@ public final class DenseEmbedding implements Embedding {
         return Math.max(-1.0, Math.min(1.0, cosine));
     }
 
+    /** Returns a defensive copy of this embedding's float components. */
     public float[] components() {
         return components.clone();
     }

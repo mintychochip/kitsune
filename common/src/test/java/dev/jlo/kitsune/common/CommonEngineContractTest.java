@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
+/** Verifies protection engine contracts using neutral contexts and deny-wins semantics. */
 final class CommonEngineContractTest {
     @Test
     void protectionDecisionsUseNeutralContextAndDenyWins() {

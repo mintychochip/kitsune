@@ -5,5 +5,8 @@ package dev.jlo.kitsune.session;
  */
 public interface SessionTask {
 
+    /**
+     * Cancels the scheduled task if it has not yet run.
+     */
     void cancel();
 }

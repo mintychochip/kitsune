@@ -22,6 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies batching, retries, ordering, and validation of the OpenAI-compatible provider.
+ */
 final class OpenAiCompatibleEmbeddingProviderTest {
     @Test
     void sendsBatchAndRestoresResponseOrder() throws Exception {

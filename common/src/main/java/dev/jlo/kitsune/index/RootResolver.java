@@ -4,8 +4,10 @@ import java.util.Objects;
 
 import dev.jlo.kitsune.model.BlockKey;
 
+/** Resolves live storage roots into canonical logical inventories. */
 public final class RootResolver<T> {
 
+    /** States produced while resolving a root. */
     public enum Status {
         RESOLVED,
         MISSING,
@@ -29,6 +31,7 @@ public final class RootResolver<T> {
         }
     }
 
+    /** Provides live availability and root probes to the resolver. */
     public interface LiveAccess<T> {
         default boolean isAvailable(BlockKey key) {
             return true;
@@ -82,10 +85,12 @@ public final class RootResolver<T> {
 
     private final LiveAccess<T> liveAccess;
 
+    /** Creates a resolver backed by live access operations. */
     public RootResolver(LiveAccess<T> liveAccess) {
         this.liveAccess = Objects.requireNonNull(liveAccess, "LiveAccess must not be null");
     }
 
+    /** Resolves a root key and reports its status and inventory. */
     public Resolution<T> resolve(BlockKey key) {
         Objects.requireNonNull(key, "Key must not be null");
 
@@ -186,6 +191,7 @@ public final class RootResolver<T> {
         return Resolution.resolved(canonical, canonicalProbe.blockType(), canonicalProbe.logicalInventory());
     }
 
+    /** Returns the stable key used for a double-chest pair. */
     public static BlockKey canonicalDoubleChest(BlockKey first, BlockKey second) {
         Objects.requireNonNull(first, "First key must not be null");
         Objects.requireNonNull(second, "Second key must not be null");

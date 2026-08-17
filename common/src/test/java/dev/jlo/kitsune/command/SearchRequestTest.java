@@ -3,6 +3,7 @@ package dev.jlo.kitsune.command;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies parsing and validation of {@link SearchRequest} from raw command arguments. */
 class SearchRequestTest {
 
     @Test

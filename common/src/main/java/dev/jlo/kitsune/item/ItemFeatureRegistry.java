@@ -7,10 +7,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+/**
+ * Applies contributions from registered item feature providers to item descriptors.
+ */
 public final class ItemFeatureRegistry {
     private final List<ItemFeatureProvider> providers;
     private final Consumer<Throwable> failureReporter;
 
+    /**
+     * Creates a registry from providers and a failure reporter.
+     *
+     * @param providers features to apply, in registration order
+     * @param failureReporter receiver for per-provider failures
+     */
     public ItemFeatureRegistry(
         Iterable<ItemFeatureProvider> providers,
         Consumer<Throwable> failureReporter
@@ -26,10 +35,17 @@ public final class ItemFeatureRegistry {
         );
     }
 
+    /** Returns an immutable snapshot of the registered providers. */
     public List<ItemFeatureProvider> providers() {
         return List.copyOf(providers);
     }
 
+    /**
+     * Applies each provider's contribution to a baseline without mutating it.
+     *
+     * @param item the item being contributed to
+     * @param baseline builder receiving the merged contribution
+     */
     public void contribute(ItemDescriptor item, ItemDescriptor.Builder baseline) {
         Objects.requireNonNull(item, "Item must not be null");
         Objects.requireNonNull(baseline, "Baseline must not be null");
@@ -45,6 +61,12 @@ public final class ItemFeatureRegistry {
         }
     }
 
+    /**
+     * Runs a provider call on an isolated builder and merges missing fields into the baseline.
+     *
+     * @param baseline builder receiving the contribution
+     * @param providerCall contribution to run against the isolated builder
+     */
     public static void applyContribution(
         ItemDescriptor.Builder baseline,
         Consumer<ItemDescriptor.Builder> providerCall

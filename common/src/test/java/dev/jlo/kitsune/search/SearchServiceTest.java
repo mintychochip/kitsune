@@ -53,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Verifies search filtering, ranking, pagination, and access handling. */
 class SearchServiceTest {
     private static final UUID WORLD_ID = UUID.nameUUIDFromBytes("search-world".getBytes(StandardCharsets.UTF_8));
     private static final UUID PLAYER_ID = UUID.nameUUIDFromBytes("search-player".getBytes(StandardCharsets.UTF_8));

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
+/** Verifies that common-module tests do not depend on platform-specific libraries. */
 final class CommonDependencyBoundaryTest {
     @Test
     void commonTestClasspathContainsNoPlatformDependency() {

@@ -3,6 +3,14 @@ package dev.jlo.kitsune.model;
 import java.util.Arrays;
 import java.util.Objects;
 
+/**
+ * Immutable identity of a root container observed at a revision.
+ *
+ * @param key         block key of the root
+ * @param blockType   type of the root block
+ * @param fingerprint binary fingerprint of the observed contents
+ * @param revision    monotonically increasing revision of the observation
+ */
 public record RootIdentity(BlockKey key, String blockType, byte[] fingerprint, long revision) {
     public RootIdentity {
         Objects.requireNonNull(key, "Key must not be null");
@@ -12,10 +20,16 @@ public record RootIdentity(BlockKey key, String blockType, byte[] fingerprint, l
         fingerprint = fingerprint.clone();
     }
 
+    /**
+     * @return the block key of the root
+     */
     public BlockKey key() {
         return key;
     }
 
+    /**
+     * @return a defensive copy of the fingerprint
+     */
     public byte[] fingerprint() {
         return fingerprint.clone();
     }

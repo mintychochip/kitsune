@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+/** Demonstrates a platform-neutral consumer using only public Kitsune contracts. */
 final class ApiUsageExampleTest {
     @Test
     void neutralConsumerUsesOnlyPublicContracts() {
@@ -46,6 +47,7 @@ final class ApiUsageExampleTest {
         assertNotNull(embeddings.decode(embedding.encode(), embedding.norm()));
     }
 
+    /** Example {@link BlockAccessProvider} that always allows access. */
     private static final class ExampleAccessProvider implements BlockAccessProvider {
         @Override
         public AccessDecision canAccess(AccessContext context) {
@@ -53,6 +55,7 @@ final class ApiUsageExampleTest {
         }
     }
 
+    /** Example {@link EmbeddingProvider} producing {@link ExampleEmbedding} vectors keyed by content length. */
     private static final class ExampleEmbeddingProvider implements EmbeddingProvider {
         @Override
         public String id() {
@@ -80,6 +83,7 @@ final class ApiUsageExampleTest {
         }
     }
 
+    /** Example {@link Embedding} that defensively copies its payload and normalizes norm to 1.0. */
     private record ExampleEmbedding(byte[] payload) implements Embedding {
         private ExampleEmbedding {
             payload = Arrays.copyOf(payload, payload.length);

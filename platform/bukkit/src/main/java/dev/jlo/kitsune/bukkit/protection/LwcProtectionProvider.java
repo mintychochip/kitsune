@@ -13,9 +13,15 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Objects;
 
+/**
+ * Enforces LWC chest protection access via reflective access to the LWC plugin API.
+ */
 public final class LwcProtectionProvider implements BlockAccessProvider {
     private final LwcAccess access;
 
+    /**
+     * Creates a provider that reflects into the live LWC plugin instance.
+     */
     public LwcProtectionProvider() {
         this(new ReflectiveLwcAccess());
     }
@@ -24,6 +30,12 @@ public final class LwcProtectionProvider implements BlockAccessProvider {
         this.access = Objects.requireNonNull(access, "LWC access must not be null");
     }
 
+    /**
+     * Resolves the player and block implied by the context and checks LWC access.
+     *
+     * @param context access request context
+     * @return the resulting access decision
+     */
     @Override
     public AccessDecision canAccess(AccessContext context) {
         Objects.requireNonNull(context, "Access context must not be null");
@@ -34,6 +46,13 @@ public final class LwcProtectionProvider implements BlockAccessProvider {
         return canAccess(player, block);
     }
 
+    /**
+     * Checks whether a player may access a specific block protected by LWC.
+     *
+     * @param player player requesting access
+     * @param block block to inspect
+     * @return the resulting access decision
+     */
     public AccessDecision canAccess(Player player, Block block) {
         Objects.requireNonNull(player, "Player must not be null");
         Objects.requireNonNull(block, "Block must not be null");

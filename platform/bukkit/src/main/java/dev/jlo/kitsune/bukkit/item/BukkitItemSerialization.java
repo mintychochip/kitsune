@@ -7,9 +7,19 @@ import java.util.TreeMap;
 
 import org.bukkit.inventory.ItemStack;
 
+/**
+ * Serializes Bukkit {@link ItemStack}s into deterministic byte fingerprints
+ * for change comparison and content hashing.
+ */
 public final class BukkitItemSerialization {
     private BukkitItemSerialization() {}
 
+    /**
+     * Renders a stack to a canonical UTF-8 byte array.
+     *
+     * @param stack stack to serialize, must not be {@code null}
+     * @return byte representation of the stack's serialized contents
+     */
     public static byte[] bytes(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
         StringBuilder result = new StringBuilder();

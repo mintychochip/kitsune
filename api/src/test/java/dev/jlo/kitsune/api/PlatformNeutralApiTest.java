@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
+/** Verifies public Kitsune API types expose no platform-specific types in their surface. */
 final class PlatformNeutralApiTest {
     private static final List<String> PUBLIC_TYPES = List.of(
         "dev.jlo.kitsune.model.BlockKey",

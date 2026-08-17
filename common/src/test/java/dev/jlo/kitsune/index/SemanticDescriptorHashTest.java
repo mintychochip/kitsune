@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies semantic descriptor hashing ignores incidental fields and matches SHA-256.
+ */
 class SemanticDescriptorHashTest {
     @Test
     void amountDoesNotChangeTheHash() {

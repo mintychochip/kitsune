@@ -9,7 +9,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies parsing and validation of OpenAI-compatible embedding settings.
+ */
 final class OpenAiCompatibleEmbeddingSettingsTest {
+    /** Ensures configured values and defaults are applied when parsing settings. */
     @Test
     void parsesConfiguredValuesAndDefaults() {
         OpenAiCompatibleEmbeddingSettings settings = OpenAiCompatibleEmbeddingSettings.from(Map.of(

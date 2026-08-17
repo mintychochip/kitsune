@@ -80,6 +80,14 @@ public final class BukkitRuntime implements AutoCloseable {
     private volatile dev.jlo.kitsune.command.KitsuneCommand kitsuneCommand;
     private volatile BlockAccessProvider lwcProtectionProvider;
 
+    /**
+     * Creates a runtime bound to a plugin and server, with optional Paper capabilities.
+     *
+     * @param plugin owning Java plugin
+     * @param server Bukkit server
+     * @param dataDirectory directory for persistent data
+     * @param paperCapabilities whether Paper-only features are enabled
+     */
     public BukkitRuntime(
         JavaPlugin plugin,
         Server server,
@@ -92,10 +100,18 @@ public final class BukkitRuntime implements AutoCloseable {
         this.paperCapabilities = paperCapabilities;
     }
 
+    /**
+     * Returns whether this runtime enables Paper-only capabilities.
+     *
+     * @return {@code true} when Paper capabilities are enabled
+     */
     public boolean paperCapabilities() {
         return paperCapabilities;
     }
 
+    /**
+     * Begins asynchronous startup, loading config and opening the index repository.
+     */
     public void start() {
         if (!started.compareAndSet(false, true)) return;
         if (!setCommandUnavailable("Kitsune is still starting.")) {
@@ -147,6 +163,10 @@ public final class BukkitRuntime implements AutoCloseable {
         );
     }
 
+    /**
+     * Shuts down the runtime, stopping bootstrap, canceling index work,
+     * unregistering listeners, and closing resources.
+     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) return;

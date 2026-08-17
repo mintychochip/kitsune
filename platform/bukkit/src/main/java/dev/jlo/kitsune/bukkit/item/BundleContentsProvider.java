@@ -6,6 +6,9 @@ import java.util.List;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BundleMeta;
 
+/**
+ * Provides the items stored inside Minecraft bundle items.
+ */
 final class BundleContentsProvider implements BukkitNestedContentsProvider {
     @Override
     public boolean supports(ItemStack stack) {

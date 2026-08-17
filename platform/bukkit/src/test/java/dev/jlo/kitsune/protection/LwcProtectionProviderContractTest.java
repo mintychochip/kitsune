@@ -9,11 +9,18 @@ import java.lang.reflect.Proxy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+/**
+ * Verifies the access decisions issued by {@link LwcProtectionProvider} across
+ * absent, accessible, inaccessible, and failing LWC lookups.
+ */
 class LwcProtectionProviderContractTest {
     private static final Player PLAYER = proxy(Player.class);
     private static final Block BLOCK = proxy(Block.class);
     private static final Object PROTECTION = new Object();
 
+    /**
+     * Absence of any protection is reported as not applicable.
+     */
     @Test
     void noProtectionIsNotApplicable() {
         var provider = new LwcProtectionProvider(
@@ -26,6 +33,9 @@ class LwcProtectionProviderContractTest {
         );
     }
 
+    /**
+     * A protection the player may access results in {@code ALLOW}.
+     */
     @Test
     void accessibleProtectionAllows() {
         var provider = new LwcProtectionProvider(
@@ -38,6 +48,9 @@ class LwcProtectionProviderContractTest {
         );
     }
 
+    /**
+     * A protection the player may not access results in {@code DENY}.
+     */
     @Test
     void inaccessibleProtectionDenies() {
         var provider = new LwcProtectionProvider(
@@ -50,6 +63,9 @@ class LwcProtectionProviderContractTest {
         );
     }
 
+    /**
+     * A failing protection lookup results in {@code DENY}.
+     */
     @Test
     void protectionLookupFailureDenies() {
         var provider = new LwcProtectionProvider(
@@ -62,6 +78,9 @@ class LwcProtectionProviderContractTest {
         );
     }
 
+    /**
+     * A failing access check results in {@code DENY}.
+     */
     @Test
     void accessCheckFailureDenies() {
         var provider = new LwcProtectionProvider(

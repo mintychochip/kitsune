@@ -6,9 +6,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Computes the set of storage roots whose index entries depend on a changed
+ * block, including its orthogonal neighbors.
+ */
 final class StorageTopology {
     private StorageTopology() {}
 
+    /**
+     * Returns the root and its horizontal neighbors as the affected root set.
+     *
+     * @param changed changed block key
+     * @return immutable list of the changed root and its valid neighbors
+     */
     static List<BlockKey> affectedRoots(BlockKey changed) {
         Objects.requireNonNull(changed, "Changed root must not be null");
         List<BlockKey> roots = new ArrayList<>(5);

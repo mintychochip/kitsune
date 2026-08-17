@@ -3,7 +3,9 @@ package dev.jlo.kitsune.search;
 import java.time.Duration;
 import java.util.Objects;
 
+/** Configures search radius, ranking thresholds, result limits, and warmup time. */
 public record SearchPolicy(int radius, double minimumScore, int maxResults, int maxPathsPerRoot, Duration warmupTimeout) {
+    /** Validates the policy bounds and timeout. */
     public SearchPolicy {
         if (radius < 1 || radius > 128) {
             throw new IllegalArgumentException("Search radius must be between 1 and 128");

@@ -7,7 +7,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies environment-based credential reference resolution.
+ */
 final class EnvironmentCredentialResolverTest {
+    /** Ensures only matching environment references are resolved, never other reference forms. */
     @Test
     void resolvesEnvironmentReferenceWithoutExposingOtherReferences() {
         EnvironmentCredentialResolver resolver = new EnvironmentCredentialResolver(

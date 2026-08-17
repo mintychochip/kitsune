@@ -28,17 +28,34 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Describes, fingerprints, and traverses Forge {@link ItemStack}s for indexing.
+ */
 public final class ForgeItemAccess implements TraversalAdapter<ItemStack> {
     private final HolderLookup.Provider registryLookup;
 
+    /**
+     * Creates item access without a registry lookup, disabling NBT component traversal.
+     */
     public ForgeItemAccess() {
         this(null);
     }
 
+    /**
+     * Creates item access using the supplied registry lookup to parse nested stacks.
+     *
+     * @param registryLookup registry lookup used to parse {@link CustomData} item lists, or {@code null}
+     */
     public ForgeItemAccess(HolderLookup.Provider registryLookup) {
         this.registryLookup = registryLookup;
     }
 
+    /**
+     * Builds an item descriptor summarising the stack's identity, text, and enrichment data.
+     *
+     * @param stack non-empty stack to describe
+     * @return descriptor of the stack
+     */
     @Override
     public ItemDescriptor describe(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -82,6 +99,12 @@ public final class ForgeItemAccess implements TraversalAdapter<ItemStack> {
         return descriptor.build();
     }
 
+    /**
+     * Computes a stable content hash for a stack based on its full string form.
+     *
+     * @param stack stack to fingerprint
+     * @return SHA-256 digest of the stack representation
+     */
     @Override
     public byte[] fingerprint(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -93,6 +116,12 @@ public final class ForgeItemAccess implements TraversalAdapter<ItemStack> {
         }
     }
 
+    /**
+     * Returns the nested stacks contained in a stack's bundle, container, and registry-backed NBT lists.
+     *
+     * @param stack stack whose children are collected
+     * @return an immutable, slot-ordered list of child stacks
+     */
     @Override
     public List<TraversalChild<ItemStack>> children(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");

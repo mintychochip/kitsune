@@ -6,6 +6,7 @@ import dev.jlo.kitsune.model.RootIdentity;
 import java.util.List;
 import java.util.Objects;
 
+/** Aggregates matching items and ranking data for one root. */
 public record RootMatch(
     RootIdentity identity,
     double distance,
@@ -13,6 +14,7 @@ public record RootMatch(
     int totalMatchingStacks,
     List<ItemMatch> itemMatches
 ) {
+    /** Validates ranking data and defensively copies item matches. */
     public RootMatch {
         Objects.requireNonNull(identity, "Identity must not be null");
         if (!Double.isFinite(distance) || distance < 0) {
@@ -36,6 +38,7 @@ public record RootMatch(
         }
     }
 
+    /** Returns the block key of this root. */
     public BlockKey key() {
         return identity.key();
     }

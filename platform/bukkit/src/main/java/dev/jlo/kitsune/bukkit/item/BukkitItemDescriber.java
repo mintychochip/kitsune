@@ -30,16 +30,32 @@ import org.bukkit.potion.PotionEffect;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
 
+/**
+ * Produces bounded text descriptions of Bukkit {@link ItemStack}s.
+ */
 public final class BukkitItemDescriber {
     private static final int MAX_ENTRIES = 256;
     private static final int MAX_TEXT_CODE_POINTS = 256;
 
     private BukkitItemDescriber() {}
 
+    /**
+     * Describes a stack using the global Bukkit server.
+     *
+     * @param stack stack to describe
+     * @return bounded descriptor for the stack
+     */
     public static ItemDescriptor describe(ItemStack stack) {
         return describe(stack, org.bukkit.Bukkit.getServer());
     }
 
+    /**
+     * Describes a stack using the supplied server for tag lookups.
+     *
+     * @param stack stack to describe
+     * @param server server providing tags and registry context
+     * @return bounded descriptor for the stack
+     */
     public static ItemDescriptor describe(ItemStack stack, Server server) {
         if (isEmpty(stack)) {
             return ItemDescriptor.builder()
@@ -67,6 +83,12 @@ public final class BukkitItemDescriber {
         return builder.buildBounded(MAX_ENTRIES, MAX_TEXT_CODE_POINTS);
     }
 
+    /**
+     * Returns whether a stack is empty (null, air, or non-positive amount).
+     *
+     * @param stack stack to test, may be {@code null}
+     * @return {@code true} when the stack holds no items
+     */
     public static boolean isEmpty(ItemStack stack) {
         return stack == null || stack.getType() == Material.AIR || stack.getAmount() <= 0;
     }

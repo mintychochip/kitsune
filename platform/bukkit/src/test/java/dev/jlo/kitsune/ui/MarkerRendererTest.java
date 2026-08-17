@@ -26,7 +26,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies how {@link MarkerRenderer} spawns hidden displays, shows them only
+ * to the owner, and handles show or spawn failures.
+ */
 class MarkerRendererTest {
+    /**
+     * The display is configured hidden and non-persistent before spawn, then
+     * shown only to the owner; removing the marker is idempotent.
+     */
     @Test
     void configuresDefaultHiddenDisplayBeforeSpawnAndShowsOnlyTheOwner() {
         MarkerHarness harness = MarkerHarness.create(false, false);
@@ -62,6 +70,10 @@ class MarkerRendererTest {
         assertEquals(1, harness.removeCalls().get(), "rendered marker removal must be idempotent");
     }
 
+    /**
+     * A failure while showing the display removes the spawned display and
+     * returns no marker.
+     */
     @Test
     void showFailureRemovesTheSpawnedDisplayAndReturnsNoMarker() {
         MarkerHarness harness = MarkerHarness.create(true, false);
@@ -77,6 +89,9 @@ class MarkerRendererTest {
         assertTrue(harness.calls().contains("show:owner"));
     }
 
+    /**
+     * A failure while spawning returns no marker and never calls show entity.
+     */
     @Test
     void spawnFailureReturnsNoMarkerAndNeverCallsShowEntity() {
         MarkerHarness harness = MarkerHarness.create(false, true);
@@ -92,6 +107,10 @@ class MarkerRendererTest {
         assertEquals(0, harness.removeCalls().get());
     }
 
+    /**
+     * A fully-faked rendering harness that records display configuration
+     * calls, spawned text and locations, chunk-loaded checks, and removals.
+     */
     private record MarkerHarness(
         MarkerRenderer renderer,
         Player owner,

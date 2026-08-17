@@ -42,6 +42,9 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Owns the Kitsune indexing and search services for a Forge server lifecycle.
+ */
 public final class ForgeRuntime implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("Kitsune");
 
@@ -67,6 +70,12 @@ public final class ForgeRuntime implements AutoCloseable {
     private CompletableFuture<Void> indexReady;
     private long ticks;
 
+    /**
+     * Starts the runtime against the supplied server, loading config and building services.
+     *
+     * @param server server the runtime serves
+     * @throws IllegalStateException when initialization fails
+     */
     public void start(MinecraftServer server) {
         Objects.requireNonNull(server, "Server must not be null");
         if (!started.compareAndSet(false, true)) return;
@@ -125,15 +134,31 @@ public final class ForgeRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Registers the Kitsune command with the dispatcher, once per runtime.
+     *
+     * @param dispatcher dispatcher to register the command with
+     */
     public void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         Objects.requireNonNull(dispatcher, "Dispatcher must not be null");
         if (commandRegistered.compareAndSet(false, true)) ForgeCommand.register(dispatcher, this);
     }
 
+    /**
+     * Sends the command usage text to a command source.
+     *
+     * @param source recipient of the usage text
+     */
     public void sendUsage(CommandSourceStack source) {
         source.sendFailure(Component.literal("Usage: /kitsune [--verbose] <query>"));
     }
 
+    /**
+     * Parses a query and asynchronously runs a search for the issuing player.
+     *
+     * @param source issuing command source
+     * @param rawQuery raw query text
+     */
     public void executeSearch(CommandSourceStack source, String rawQuery) {
         if (closed.get() || searchService == null || sessions == null) {
             source.sendFailure(Component.literal("Search is currently unavailable."));
@@ -174,16 +199,25 @@ public final class ForgeRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Queues an immediate reconciliation scan on the next server tick.
+     */
     public void requestScan() {
         scanQueued.set(true);
     }
 
+    /**
+     * Performs a reconciliation scan when queued or when the periodic interval elapses.
+     */
     public void onServerTick() {
         if (closed.get() || config == null) return;
         ticks++;
         if (scanQueued.getAndSet(false) || ticks % config.reconciliationPeriodTicks() == 0) scanAndSubmit();
     }
 
+    /**
+     * Shuts down services and releases resources, becoming a no-op when already closed.
+     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) return;

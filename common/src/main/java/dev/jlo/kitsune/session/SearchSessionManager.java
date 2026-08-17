@@ -24,6 +24,14 @@ public final class SearchSessionManager implements SearchGuard {
     private final Map<UUID, PlayerSession> sessions = new HashMap<>();
     private long generation;
 
+    /**
+     * Creates a manager with the given scheduler and marker lifetime.
+     *
+     * @param scheduler      scheduler used to schedule session expiry
+     * @param markerLifetime lifetime after which a session's markers expire
+     * @throws NullPointerException     if either argument is null
+     * @throws IllegalArgumentException if the marker lifetime is not positive
+     */
     public SearchSessionManager(SessionScheduler scheduler, Duration markerLifetime) {
         this.scheduler = Objects.requireNonNull(scheduler, "Scheduler must not be null");
         Objects.requireNonNull(markerLifetime, "Marker lifetime must not be null");
@@ -33,6 +41,14 @@ public final class SearchSessionManager implements SearchGuard {
         this.markerLifetime = markerLifetime;
     }
 
+    /**
+     * Begins a new search session for the given player, invalidating any prior
+     * session and its markers.
+     *
+     * @param playerId player owning the session
+     * @return the token identifying the new session
+     * @throws NullPointerException if the player ID is null
+     */
     public SearchToken begin(UUID playerId) {
         Objects.requireNonNull(playerId, "Player ID must not be null");
         synchronized (sessions) {
@@ -62,6 +78,21 @@ public final class SearchSessionManager implements SearchGuard {
         }
     }
 
+    /**
+     * Attaches rendered markers to the current session for the given token.
+     *
+     * <p>Markers are rejected when they duplicate an existing marker id with
+     * different content, or when the token no longer identifies the current
+     * session for the owning player. Rejected markers are removed and the
+     * collection is left unmodified.
+     *
+     * @param token   token identifying the session
+     * @param markers markers to attach
+     * @return {@code true} if the session is still current and markers were
+     *         attached, {@code false} if the session had ended
+     * @throws NullPointerException if either argument is null or a marker has
+     *         a null id or root
+     */
     public boolean attach(
         SearchToken token,
         Collection<? extends RenderedMarker> markers
@@ -118,6 +149,13 @@ public final class SearchSessionManager implements SearchGuard {
         }
     }
 
+    /**
+     * Invalidates and clears every session tracking a marker rooted at the
+     * given block.
+     *
+     * @param root block root to invalidate
+     * @throws NullPointerException if the root is null
+     */
     public void invalidateRoot(BlockKey root) {
         Objects.requireNonNull(root, "Root must not be null");
         synchronized (sessions) {
@@ -143,10 +181,24 @@ public final class SearchSessionManager implements SearchGuard {
         }
     }
 
+    /**
+     * Reports whether the session for the given player still carries the
+     * expected generation.
+     *
+     * @param playerId          player owning the session
+     * @param expectedGeneration generation to compare against
+     * @return {@code true} if the session is current
+     */
     public boolean isCurrent(UUID playerId, long expectedGeneration) {
         return isCurrent(new SearchToken(playerId, expectedGeneration));
     }
 
+    /**
+     * Ends the current session for the given player, removing its markers.
+     *
+     * @param playerId player whose session to clear
+     * @throws NullPointerException if the player ID is null
+     */
     public void clear(UUID playerId) {
         Objects.requireNonNull(playerId, "Player ID must not be null");
         synchronized (sessions) {
@@ -157,6 +209,15 @@ public final class SearchSessionManager implements SearchGuard {
         }
     }
 
+    /**
+     * Ends the session identified by the token, removing its markers.
+     *
+     * <p>No action is taken when the session has already been replaced or
+     * ended.
+     *
+     * @param token token identifying the session to clear
+     * @throws NullPointerException if the token is null
+     */
     public void clear(SearchToken token) {
         Objects.requireNonNull(token, "Token must not be null");
         synchronized (sessions) {
@@ -169,6 +230,9 @@ public final class SearchSessionManager implements SearchGuard {
         }
     }
 
+    /**
+     * Ends every session, removing all tracked markers.
+     */
     public void clearAll() {
         synchronized (sessions) {
             List<PlayerSession> detached = List.copyOf(sessions.values());

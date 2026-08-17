@@ -3,6 +3,9 @@ package dev.jlo.kitsune.paper;
 import dev.jlo.kitsune.bukkit.BukkitRuntime;
 import org.bukkit.plugin.java.JavaPlugin;
 
+/**
+ * Paper plugin entrypoint for the shared Bukkit runtime.
+ */
 public final class PaperPlugin extends JavaPlugin {
     private BukkitRuntime runtime;
 

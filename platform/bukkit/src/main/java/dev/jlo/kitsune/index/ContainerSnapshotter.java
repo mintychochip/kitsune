@@ -18,9 +18,21 @@ import dev.jlo.kitsune.model.ItemPath;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+/**
+ * Creates immutable container snapshots and fingerprints from Bukkit inventories.
+ */
 public final class ContainerSnapshotter {
+    /**
+     * Outcome states produced while resolving and snapshotting a container.
+     */
     public enum Status { COMPLETE, MISSING, UNAVAILABLE, UNRESOLVED_LOOT, UNSUPPORTED }
 
+    /**
+     * Result of a snapshot attempt.
+     *
+     * @param status snapshot outcome
+     * @param draft completed snapshot data, present only for {@link Status#COMPLETE}
+     */
     public record Result(Status status, ContainerDraft draft) {
         public Result {
             Objects.requireNonNull(status, "Status must not be null");
@@ -33,11 +45,23 @@ public final class ContainerSnapshotter {
     private final RootResolver<Inventory> resolver;
     private final NestedItemWalker<ItemStack> walker;
 
+    /**
+     * Creates a snapshotter using the supplied root resolver and nested-item walker.
+     *
+     * @param resolver resolves logical inventories from block keys
+     * @param walker traverses nested item contents
+     */
     public ContainerSnapshotter(RootResolver<Inventory> resolver, NestedItemWalker<ItemStack> walker) {
         this.resolver = Objects.requireNonNull(resolver, "Resolver must not be null");
         this.walker = Objects.requireNonNull(walker, "Walker must not be null");
     }
 
+    /**
+     * Snapshots the inventory resolved at a block key.
+     *
+     * @param key block key identifying the candidate root
+     * @return snapshot status and, when complete, immutable draft data
+     */
     public Result snapshot(BlockKey key) {
         Objects.requireNonNull(key, "Key must not be null");
         RootResolver.Resolution<Inventory> resolution = resolver.resolve(key);

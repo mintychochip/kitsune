@@ -12,14 +12,26 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Encodes and decodes nested-item paths for compact persistence.
+ */
 final class ItemPathCodec {
 
+    /** Maximum number of steps accepted in one path. */
     static final int MAX_STEP_COUNT = 65535;
+    /** Maximum UTF-8 byte length of one step label. */
     static final int MAX_STEP_LABEL_BYTES = 65535;
+    /** Maximum encoded payload size for one path. */
     static final int MAX_PAYLOAD_BYTES = 1 * 1024 * 1024;
 
     private ItemPathCodec() {}
 
+    /**
+     * Encodes a path using the versioned binary representation.
+     *
+     * @param path path to encode
+     * @return encoded path payload
+     */
     static byte[] encode(ItemPath path) {
         try {
             var bytes = new BoundedByteArrayOutputStream(
@@ -45,6 +57,12 @@ final class ItemPathCodec {
         }
     }
 
+    /**
+     * Decodes a versioned payload back into a path.
+     *
+     * @param payload encoded path payload
+     * @return the decoded path
+     */
     static ItemPath decode(byte[] payload) {
         if (payload == null) {
             throw new IllegalArgumentException("Null path payload");

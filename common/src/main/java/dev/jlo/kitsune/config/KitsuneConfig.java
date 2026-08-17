@@ -1,10 +1,36 @@
 package dev.jlo.kitsune.config;
 
+/**
+ * Immutable configuration for the Kitsune indexing and search engine.
+ *
+ * <p>All values are validated by {@link #validated} before construction; a record built
+ * directly bypasses that validation. Fields control coordinate-based search, per-tick work
+ * budgets, reconciliation, traversal depth, and the selected embedding provider.
+ */
 public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int maxResults,
                             int maxPathsPerRoot, int warmupTimeoutSeconds, int markerDurationSeconds,
                             int chunksPerTick, int rootsPerTick, int reconciliationPeriodTicks,
                             int maximumDepth, int maximumStacksPerRoot, String embeddingProvider) {
 
+    /**
+     * Validates all configuration values and returns a config only when every bound holds.
+     *
+     * @param radius minimum search radius, at least 1
+     * @param maxRadius maximum search radius, between 1 and 128 and not below {@code radius}
+     * @param minimumScore required similarity score in {@code [0.0, 1.0]}, finite
+     * @param maxResults maximum result count, between 1 and 256
+     * @param maxPathsPerRoot maximum paths indexed per root, between 1 and 128
+     * @param warmupTimeoutSeconds warmup timeout in seconds, between 1 and 30
+     * @param markerDurationSeconds marker display duration in seconds, between 1 and 300
+     * @param chunksPerTick chunk work budget per tick, between 1 and 16
+     * @param rootsPerTick root work budget per tick, between 1 and 128
+     * @param reconciliationPeriodTicks reconciliation period in ticks, between 20 and 72000
+     * @param maximumDepth maximum traversal depth, between 1 and 8
+     * @param maximumStacksPerRoot maximum stacks stored per root, between 1 and 16384
+     * @param embeddingProvider identifier of the configured embedding provider, non-blank
+     * @return a validated configuration
+     * @throws IllegalArgumentException if any value is outside its permitted range
+     */
     public static KitsuneConfig validated(int radius, int maxRadius, double minimumScore,
                                           int maxResults, int maxPathsPerRoot,
                                           int warmupTimeoutSeconds, int markerDurationSeconds,
@@ -38,6 +64,7 @@ public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int 
                 reconciliationPeriodTicks, maximumDepth, maximumStacksPerRoot, embeddingProvider);
     }
 
+    /** Builds an {@link IllegalArgumentException} naming the offending configuration category. */
     private static IllegalArgumentException invalid(String category) {
         return new IllegalArgumentException("Invalid " + category);
     }

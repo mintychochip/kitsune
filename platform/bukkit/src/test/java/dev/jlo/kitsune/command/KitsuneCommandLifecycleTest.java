@@ -17,7 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+/**
+ * Verifies how the kitsune command reacts when a server-thread dispatch is
+ * rejected before the search session completes.
+ */
 class KitsuneCommandLifecycleTest {
+    /**
+     * A rejected server-thread completion clears the associated search session
+     * and removes its rendered marker.
+     */
     @Test
     void rejectedServerThreadCompletionClearsTheSearchSession() {
         SearchSessionManager sessions = new SearchSessionManager(
@@ -40,6 +48,7 @@ class KitsuneCommandLifecycleTest {
         assertTrue(marker.removed);
     }
 
+    /** A {@link ServerThreadBridge} whose scheduling operations always fail. */
     private static final class RejectingServerThreadBridge
         implements ServerThreadBridge {
         @Override
@@ -57,6 +66,7 @@ class KitsuneCommandLifecycleTest {
         }
     }
 
+    /** A {@link RenderedMarker} that records whether it was removed. */
     private static final class RecordingMarker implements RenderedMarker {
         private final UUID id = UUID.randomUUID();
         private final BlockKey root;

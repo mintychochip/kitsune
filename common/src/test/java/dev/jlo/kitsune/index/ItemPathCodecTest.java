@@ -11,6 +11,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies item-path encoding round-trips and rejection of malformed payloads.
+ */
 class ItemPathCodecTest {
 
     @Test

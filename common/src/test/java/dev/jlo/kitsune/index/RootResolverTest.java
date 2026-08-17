@@ -16,6 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies root canonicalization, live-access probing, and double-chest resolution.
+ */
 class RootResolverTest {
 
     private static final UUID WORLD_ID = new UUID(0L, 1L);

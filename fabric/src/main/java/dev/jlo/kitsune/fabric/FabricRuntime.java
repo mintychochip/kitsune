@@ -44,6 +44,16 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Owns the Kitsune services for a Minecraft server.
+ *
+ * <p>On {@link #start(MinecraftServer)} the runtime loads configuration,
+ * opens the index repository and embedding provider, constructs the search
+ * service and session machinery, registers the command and world/session
+ * listeners, and queues an initial scan. It then reconciles the index each
+ * server tick when a scan is queued or the reconciliation period elapses.
+ * {@link #close()} shuts down all owned services and releases resources.
+ */
 public final class FabricRuntime implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("Kitsune");
 
@@ -68,6 +78,14 @@ public final class FabricRuntime implements AutoCloseable {
     private CompletableFuture<Void> indexReady;
     private long ticks;
 
+    /**
+     * Initializes the runtime for the given server and queues an initial scan.
+     * A second call while already started is a no-op.
+     *
+     * @param server server to index and serve
+     * @throws IllegalStateException if initialization fails, in which case the
+     *                               runtime is closed before rethrowing
+     */
     public void start(MinecraftServer server) {
         Objects.requireNonNull(server, "Server must not be null");
         if (!started.compareAndSet(false, true)) return;
@@ -128,10 +146,22 @@ public final class FabricRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Sends command usage feedback to the source.
+     *
+     * @param source command source to notify
+     */
     public void sendUsage(ServerCommandSource source) {
         source.sendError(Text.literal("Usage: /kitsune [--verbose] <query>"));
     }
 
+    /**
+     * Runs a search for the issuing player's current world position and
+     * schedules the result feedback back on the server thread.
+     *
+     * @param source command source for the player issuing the search
+     * @param rawQuery whitespace-delimited raw query
+     */
     public void executeSearch(ServerCommandSource source, String rawQuery) {
         if (closed.get() || searchService == null || sessions == null) {
             source.sendError(Text.literal("Search is currently unavailable."));
@@ -173,10 +203,17 @@ public final class FabricRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * Queues a rescan to be performed on the next server tick.
+     */
     public void requestScan() {
         scanQueued.set(true);
     }
 
+    /**
+     * Closes the runtime, stopping all owned services and releasing resources.
+     * A second call is a no-op.
+     */
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) return;
@@ -260,6 +297,14 @@ public final class FabricRuntime implements AutoCloseable {
         });
     }
 
+    /**
+     * Determines whether the current scan makes the index ready. Currently
+     * always returns true once both inputs are non-null.
+     *
+     * @param current current scan results
+     * @param previous previous index state
+     * @return {@code true} if the index is ready
+     */
     static boolean scanIsReady(List<?> current, Map<?, ?> previous) {
         Objects.requireNonNull(current, "Current scan must not be null");
         Objects.requireNonNull(previous, "Previous index state must not be null");

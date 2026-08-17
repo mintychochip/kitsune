@@ -13,10 +13,19 @@ import org.bukkit.loot.Lootable;
 
 import java.util.Objects;
 
+/**
+ * Builds Bukkit-backed root resolvers that discover logical container inventories.
+ */
 public final class BukkitRootResolver {
     private BukkitRootResolver() {
     }
 
+    /**
+     * Creates a root resolver for the live chunk and inventory state of a server.
+     *
+     * @param server server providing world and block state
+     * @return a root resolver for the server
+     */
     public static RootResolver<Inventory> forServer(Server server) {
         return new RootResolver<>(new SpigotLiveAccess(Objects.requireNonNull(server, "Server must not be null")));
     }

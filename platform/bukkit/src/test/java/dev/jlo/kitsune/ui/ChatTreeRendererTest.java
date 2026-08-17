@@ -18,6 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies the chat and marker text produced by {@link ChatTreeRenderer},
+ * including aggregate output, verbose trees, totals, and truncation.
+ */
 class ChatTreeRendererTest {
     private static final ChatTreeRenderer RENDERER = new ChatTreeRenderer();
     private static final UUID WORLD_ID = UUID.nameUUIDFromBytes("chat-tree-renderer".getBytes(StandardCharsets.UTF_8));
@@ -25,6 +29,10 @@ class ChatTreeRendererTest {
     private static final String LONG_LABEL_SEGMENT = LONG_SURROGATE_SEGMENT + LONG_SURROGATE_SEGMENT + " ";
     private static final String LONG_LABEL = LONG_LABEL_SEGMENT.repeat(100);
 
+    /**
+     * Normal chat and marker output contains only the aggregate summary and a
+     * minimal marker, without verbose coordinates or scores.
+     */
     @Test
     void normalOutputContainsOnlyAggregateAndMinimalMarker() {
         SearchOutcome outcome = oneNestedMatchOutcome(1, 1);
@@ -39,6 +47,10 @@ class ChatTreeRendererTest {
         assertFalse(chat.contains("12, 64, -8"));
     }
 
+    /**
+     * The verbose chat rendering shows root slots, nested slots, amounts,
+     * scores, and coordinates.
+     */
     @Test
     void verboseTreeShowsRootSlotsNestedSlotsAmountsScoresAndCoordinates() {
         String text = RENDERER.verboseChat("mending", oneNestedMatchOutcome(1, 1));
@@ -52,6 +64,10 @@ class ChatTreeRendererTest {
         );
     }
 
+    /**
+     * Verbose and aggregate output use outcome totals and append a
+     * "showing X of Y" suffix only when results are capped.
+     */
     @Test
     void verboseAndAggregateOutputUseOutcomeTotalsAndSuffixOnlyWhenCapped() {
         SearchOutcome capped = outcomeWithTotals(1, 1, 2, 4);
@@ -69,6 +85,10 @@ class ChatTreeRendererTest {
         assertFalse(uncappedVerbose.contains("Showing 1 of"));
     }
 
+    /**
+     * The verbose marker truncates at a code-point boundary without splitting
+     * lines or splitting surrogate pairs.
+     */
     @Test
     void verboseMarkerTruncatesAtCodePointBoundaryWithoutSplittingLinesOrSurrogates() {
         String text = RENDERER.verboseMarker("diamond", overflowRootMatch());

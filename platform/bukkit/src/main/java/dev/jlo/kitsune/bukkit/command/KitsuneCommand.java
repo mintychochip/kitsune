@@ -28,6 +28,9 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * Executes the {@code /kitsune} command, running searches and rendering results.
+ */
 public final class KitsuneCommand implements CommandExecutor {
     private static final String PERMISSION = "kitsune.search";
     private static final String NO_PLAYER_MESSAGE = "Only players can use this command.";
@@ -46,6 +49,18 @@ public final class KitsuneCommand implements CommandExecutor {
 
     private volatile boolean stopped;
 
+    /**
+     * Creates the command executor with the services needed to run and render searches.
+     *
+     * @param server Bukkit server
+     * @param searchService performs searches
+     * @param sessions tracks active player search sessions
+     * @param serverBridge dispatches work to the server thread
+     * @param liveRoots revalidates live roots
+     * @param policy search policy constraints
+     * @param chatRenderer renders chat output
+     * @param markerRenderer renders world markers
+     */
     public KitsuneCommand(
         Server server,
         SearchService searchService,
@@ -66,6 +81,16 @@ public final class KitsuneCommand implements CommandExecutor {
         this.markerRenderer = Objects.requireNonNull(markerRenderer, "Marker renderer must not be null");
     }
 
+    /**
+     * Parses and executes a search command, or rejects it when unavailable,
+     * the sender is not a player, or the sender lacks permission.
+     *
+     * @param sender command sender
+     * @param command command being executed
+     * @param label command label used
+     * @param args command arguments
+     * @return {@code true} when the command was handled
+     */
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (stopped) {
@@ -123,6 +148,9 @@ public final class KitsuneCommand implements CommandExecutor {
         return true;
     }
 
+    /**
+     * Stops the command, rejecting further invocations and clearing active sessions.
+     */
     public void stop() {
         stopped = true;
         sessions.clearAll();

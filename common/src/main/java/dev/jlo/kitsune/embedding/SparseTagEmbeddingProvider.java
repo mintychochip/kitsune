@@ -7,8 +7,18 @@ import dev.jlo.kitsune.model.ItemDescriptor;
 
 import java.util.*;
 
+/**
+ * Built-in provider producing sparse embeddings from {@link ItemDescriptor} features.
+ *
+ * <p>Each descriptor category contributes weighted tokens (material, display text, tags,
+ * enchantments, attributes, traits, scalar metadata, and lore). Query embedding runs the
+ * query through {@link FeatureVocabulary} tokenization and alias expansion. This provider
+ * requires no settings or credentials.
+ */
 public class SparseTagEmbeddingProvider implements EmbeddingProvider {
+    /** Stable identifier used to select and serialize this provider. */
     public static final String ID = "builtin:sparse-v1";
+    /** Provider schema/behavior version. */
     public static final int VERSION = 2;
 
     @Override
@@ -17,6 +27,12 @@ public class SparseTagEmbeddingProvider implements EmbeddingProvider {
     @Override
     public int version() { return VERSION; }
 
+    /**
+     * Embeds an item descriptor into a sparse feature map keyed by tokenized categories.
+     *
+     * @param descriptor the item descriptor to embed
+     * @return the resulting sparse embedding
+     */
     @Override
     public Embedding embed(ItemDescriptor descriptor) {
         Map<String, Double> values = new LinkedHashMap<>();
@@ -34,6 +50,12 @@ public class SparseTagEmbeddingProvider implements EmbeddingProvider {
         return SparseEmbedding.of(ID, VERSION, values);
     }
 
+    /**
+     * Embeds a natural-language query by tokenizing it and expanding aliases.
+     *
+     * @param query the query text; blank input yields an empty embedding
+     * @return the resulting sparse query embedding
+     */
     @Override
     public Embedding embedQuery(String query) {
         if (query == null || query.isBlank()) {
@@ -55,6 +77,7 @@ public class SparseTagEmbeddingProvider implements EmbeddingProvider {
         return SparseEmbedding.of(ID, VERSION, values);
     }
 
+    /** Decodes a {@link SparseEmbedding} payload for this provider. */
     @Override
     public Embedding decode(byte[] payload, double norm) {
         return SparseEmbedding.decode(ID, VERSION, payload, norm);

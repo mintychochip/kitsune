@@ -3,9 +3,18 @@ package dev.jlo.kitsune.config;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 
+/**
+ * Loads and validates Kitsune configuration from Bukkit configuration sections.
+ */
 public final class ConfigLoader {
     private ConfigLoader() {}
 
+    /**
+     * Loads configuration from a plugin's current Bukkit configuration.
+     *
+     * @param plugin plugin providing the configuration
+     * @return validated Kitsune configuration
+     */
     public static KitsuneConfig load(JavaPlugin plugin) {
         return load(plugin.getConfig());
     }

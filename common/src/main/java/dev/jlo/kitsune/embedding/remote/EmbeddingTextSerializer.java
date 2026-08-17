@@ -4,9 +4,24 @@ import dev.jlo.kitsune.model.ItemDescriptor;
 
 import java.util.Objects;
 
+/**
+ * Builds plain-text representations of item descriptors and queries for
+ * embedding.
+ */
 public final class EmbeddingTextSerializer {
     private EmbeddingTextSerializer() {}
 
+    /**
+     * Serializes the given descriptor into labeled text lines.
+     *
+     * <p>Empty and null values are omitted. Labels cover material, display
+     * text, lore, enchantments, attributes, traits, scalar metadata, and
+     * custom tags.
+     *
+     * @param descriptor descriptor to serialize
+     * @return the serialized text
+     * @throws NullPointerException if the descriptor is null
+     */
     public static String document(ItemDescriptor descriptor) {
         Objects.requireNonNull(descriptor, "Descriptor must not be null");
         StringBuilder text = new StringBuilder();
@@ -21,6 +36,13 @@ public final class EmbeddingTextSerializer {
         return text.toString();
     }
 
+    /**
+     * Normalizes a raw query for embedding.
+     *
+     * @param query query to normalize
+     * @return the normalized query text
+     * @throws NullPointerException if the query is null
+     */
     public static String query(String query) {
         Objects.requireNonNull(query, "Query must not be null");
         return normalize(query);

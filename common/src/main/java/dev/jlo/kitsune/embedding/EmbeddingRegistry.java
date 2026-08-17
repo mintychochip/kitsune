@@ -7,10 +7,25 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Immutable registry of embedding providers, always including the built-in sparse provider.
+ *
+ * <p>Registrations are added after the built-in provider, so a registration duplicating its ID
+ * is rejected. The provider whose ID matches the configured value is exposed as the selected
+ * provider.
+ */
 public final class EmbeddingRegistry {
     private final Map<String, EmbeddingProvider> providers;
     private final EmbeddingProvider selected;
 
+    /**
+     * Builds a registry from the given providers plus the built-in sparse provider.
+     *
+     * @param registrations additional providers, must not contain null or the built-in ID
+     * @param configuredId ID of the provider to select, must be registered
+     * @throws IllegalArgumentException if a registration is null or duplicate, the configured
+     *         ID is blank or unregistered, or a provider reports a blank ID
+     */
     public EmbeddingRegistry(
         Iterable<EmbeddingProvider> registrations,
         String configuredId
@@ -42,10 +57,12 @@ public final class EmbeddingRegistry {
         this.selected = selectedProvider;
     }
 
+    /** Returns an unmodifiable view of all registered providers. */
     public Collection<EmbeddingProvider> providers() {
         return Collections.unmodifiableCollection(providers.values());
     }
 
+    /** Returns the provider matching the configured ID. */
     public EmbeddingProvider selectedProvider() {
         return selected;
     }

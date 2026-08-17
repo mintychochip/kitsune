@@ -12,14 +12,31 @@ import java.util.Locale;
 import java.util.Map;
 
 
+/**
+ * Renders search results as human-readable chat and marker text.
+ */
 public final class ChatTreeRenderer {
 
+    /**
+     * Renders the compact world marker text for a matching root.
+     *
+     * @param query normalized user query
+     * @param root matching root
+     * @return marker text
+     */
     public String normalMarker(String query, RootMatch root) {
         String normalized = normalizeQuery(query);
         String text = normalized + " FOUND · " + root.totalMatchingStacks() + " · " + roundDistance(root.distance()) + "m";
         return text;
     }
 
+    /**
+     * Renders a detailed, multi-line marker text for a matching root.
+     *
+     * @param query normalized user query
+     * @param root matching root
+     * @return detailed marker text
+     */
     public String verboseMarker(String query, RootMatch root) {
         String normalized = normalizeQuery(query);
         String header = normalized + " FOUND · " + root.totalMatchingStacks() + " · " + roundDistance(root.distance()) + "m";
@@ -37,6 +54,12 @@ public final class ChatTreeRenderer {
         return truncateVerboseMarker(tree.toString());
     }
 
+    /**
+     * Renders the compact chat summary for a search outcome.
+     *
+     * @param outcome search outcome
+     * @return chat summary text
+     */
     public String normalChat(SearchOutcome outcome) {
         int roots = outcome.totalAccessibleMatchingRoots();
         int stacks = outcome.totalAccessibleMatchingStacks();
@@ -46,6 +69,13 @@ public final class ChatTreeRenderer {
         return text;
     }
 
+    /**
+     * Renders a detailed per-root chat listing for a search outcome.
+     *
+     * @param query normalized user query
+     * @param outcome search outcome
+     * @return detailed chat text
+     */
     public String verboseChat(String query, SearchOutcome outcome) {
         StringBuilder chat = new StringBuilder();
 

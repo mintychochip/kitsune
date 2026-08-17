@@ -18,6 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies dirty-queue deduplication, budgeted ticking, readiness, and timeout behavior.
+ */
 class ContainerIndexQueueTest {
     private static final UUID WORLD_ID = new UUID(0L, 1L);
 

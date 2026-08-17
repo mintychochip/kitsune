@@ -12,19 +12,41 @@ import org.bukkit.inventory.ItemStack;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
 
+/**
+ * Adapts Bukkit {@link ItemStack}s to the kit contents traversal contract,
+ * describing, fingerprinting, and expanding nested item contents.
+ */
 public final class BukkitTraversalAdapter implements TraversalAdapter<ItemStack> {
     private final Server server;
 
+    /**
+     * Creates an adapter using the supplied server for tag context.
+     *
+     * @param server server providing tag and registry context
+     */
     public BukkitTraversalAdapter(Server server) {
         this.server = Objects.requireNonNull(server, "Server must not be null");
     }
 
+    /**
+     * Builds a descriptor for a non-empty stack.
+     *
+     * @param node stack to describe
+     * @return descriptor for the stack
+     * @throws IllegalArgumentException when the stack is empty
+     */
     @Override
     public ItemDescriptor describe(ItemStack node) {
         if (BukkitItemDescriber.isEmpty(node)) throw new IllegalArgumentException("Item stack must not be empty");
         return BukkitItemDescriber.describe(node, server);
     }
 
+    /**
+     * Returns a SHA-256 fingerprint of a stack's serialized contents.
+     *
+     * @param node stack to fingerprint
+     * @return content fingerprint bytes
+     */
     @Override
     public byte[] fingerprint(ItemStack node) {
         Objects.requireNonNull(node, "Item stack must not be null");
@@ -36,6 +58,12 @@ public final class BukkitTraversalAdapter implements TraversalAdapter<ItemStack>
         }
     }
 
+    /**
+     * Expands a stack into its nested children via registered providers, in slot order.
+     *
+     * @param node stack to expand
+     * @return an empty list for empty stacks or stacks without registered contents
+     */
     @Override
     public List<TraversalChild<ItemStack>> children(ItemStack node) {
         if (BukkitItemDescriber.isEmpty(node)) return List.of();

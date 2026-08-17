@@ -10,6 +10,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 
+/**
+ * Provides the inventory contents stored inside shulker box items.
+ */
 final class ShulkerContentsProvider implements BukkitNestedContentsProvider {
     @Override
     public boolean supports(ItemStack stack) {

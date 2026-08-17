@@ -13,15 +13,31 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Spawns and tracks world text-display markers for search results.
+ */
 public final class MarkerRenderer {
     private final Plugin plugin;
     private final Server server;
 
+    /**
+     * Creates a renderer on the plugin owning the spawned displays.
+     *
+     * @param plugin plugin owning spawned displays
+     */
     public MarkerRenderer(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin must not be null");
         this.server = Objects.requireNonNull(plugin.getServer(), "Server must not be null");
     }
 
+    /**
+     * Spawns a text display above a root and reveals it to its owner.
+     *
+     * @param owner player the marker is shown to
+     * @param root root block the marker labels
+     * @param text text displayed by the marker
+     * @return the spawned marker, or empty when the root is unreachable
+     */
     public Optional<RenderedMarker> spawn(Player owner, BlockKey root, String text) {
         Objects.requireNonNull(owner, "Owner must not be null");
         Objects.requireNonNull(root, "Root must not be null");

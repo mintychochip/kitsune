@@ -6,13 +6,28 @@ import org.bukkit.scheduler.BukkitTask;
 import java.time.Duration;
 import java.util.Objects;
 
+/**
+ * Schedules session callbacks on the Bukkit scheduler as delayed tasks.
+ */
 public final class BukkitSessionScheduler implements SessionScheduler {
     private final Plugin plugin;
 
+    /**
+     * Creates a scheduler backed by a plugin's Bukkit scheduler.
+     *
+     * @param plugin plugin whose scheduler is used
+     */
     public BukkitSessionScheduler(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "Plugin must not be null");
     }
 
+    /**
+     * Schedules an action to run after a positive delay, in whole ticks.
+     *
+     * @param delay positive delay before execution
+     * @param action action to run
+     * @return a handle whose cancellation stops the pending execution
+     */
     @Override
     public SessionTask schedule(Duration delay, Runnable action) {
         Objects.requireNonNull(delay, "Delay must not be null");

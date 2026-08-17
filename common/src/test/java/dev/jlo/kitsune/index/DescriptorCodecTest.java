@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Verifies deterministic descriptor encoding and rejection of malformed payloads.
+ */
 class DescriptorCodecTest {
 
     @Test

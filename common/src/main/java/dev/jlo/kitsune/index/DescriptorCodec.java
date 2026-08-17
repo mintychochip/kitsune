@@ -12,21 +12,47 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Binary codec for {@link ItemDescriptor} serialization.
+ *
+ * <p>Encoding writes a version byte followed by the material key, amount, and all descriptor
+ * collections. Decoding reads the same layout, enforces the version, element-size and total
+ * payload limits, and rejects trailing bytes. The encoded form is limited to
+ * {@link #MAX_PAYLOAD_BYTES} bytes.
+ */
 final class DescriptorCodec {
 
     private static final byte VERSION = 1;
 
+    /** Maximum number of characters in a single string. */
     static final int MAX_STRING_LENGTH = 65535;
+    /** Maximum number of elements in a string list. */
     static final int MAX_STRING_LIST_SIZE = 65535;
+    /** Maximum number of entries in a serialized map. */
     static final int MAX_MAP_ENTRIES = 65535;
+    /** Maximum allowed size, in bytes, of an encoded descriptor payload. */
     static final int MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
     private DescriptorCodec() {}
 
+    /**
+     * Encodes a descriptor for storage, preserving its configured amount.
+     *
+     * @param descriptor the descriptor to encode, must not be null
+     * @return binary encoding of the descriptor
+     * @throws IllegalArgumentException if the encoded payload exceeds the size limit
+     */
     static byte[] encode(ItemDescriptor descriptor) {
         return encode(descriptor, descriptor.amount());
     }
 
+    /**
+     * Encodes a descriptor for semantic comparison, forcing the amount to 1.
+     *
+     * @param descriptor the descriptor to encode, must not be null
+     * @return binary encoding of the descriptor with amount 1
+     * @throws IllegalArgumentException if the encoded payload exceeds the size limit
+     */
     static byte[] encodeSemantic(ItemDescriptor descriptor) {
         return encode(descriptor, 1);
     }
@@ -56,6 +82,15 @@ final class DescriptorCodec {
         }
     }
 
+    /**
+     * Restores a descriptor from the payload produced by {@link #encode}.
+     *
+     * @param payload binary descriptor payload, must not be null and no larger than
+     *        {@link #MAX_PAYLOAD_BYTES}
+     * @return the decoded descriptor
+     * @throws IllegalArgumentException if the payload is null, oversized, has an unsupported
+     *         version, exceeds element-size limits, or contains trailing bytes
+     */
     static ItemDescriptor decode(byte[] payload) {
         if (payload == null) {
             throw new IllegalArgumentException("Null descriptor payload");

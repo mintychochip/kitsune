@@ -28,17 +28,39 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Adapts Minecraft item stacks to the kit contents traversal contract, describing,
+ * fingerprinting, and expanding nested storage contents.
+ */
 public final class NeoForgeItemAccess implements TraversalAdapter<ItemStack> {
     private final HolderLookup.Provider registryLookup;
 
+    /**
+     * Creates an item accessor with no registry lookup; nested children embedded
+     * in component/NBT data will not be decoded.
+     */
     public NeoForgeItemAccess() {
         this(null);
     }
 
+    /**
+     * Creates an item accessor using the given registry lookup for parsing stack
+     * data embedded in components and NBT tags.
+     *
+     * @param registryLookup registry lookup used for nested data, may be {@code null}
+     */
     public NeoForgeItemAccess(HolderLookup.Provider registryLookup) {
         this.registryLookup = registryLookup;
     }
 
+    /**
+     * Builds a descriptor for a non-empty stack, capturing material, amount,
+     * name, lore, enchantments, rarity, damage, and custom/block-entity data.
+     *
+     * @param stack stack to describe
+     * @return descriptor for the stack
+     * @throws IllegalArgumentException when the stack is empty
+     */
     @Override
     public ItemDescriptor describe(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -82,6 +104,13 @@ public final class NeoForgeItemAccess implements TraversalAdapter<ItemStack> {
         return descriptor.build();
     }
 
+    /**
+     * Returns a SHA-256 digest of the stack's string representation as a content
+     * fingerprint.
+     *
+     * @param stack stack to fingerprint
+     * @return content fingerprint bytes
+     */
     @Override
     public byte[] fingerprint(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");
@@ -93,6 +122,14 @@ public final class NeoForgeItemAccess implements TraversalAdapter<ItemStack> {
         }
     }
 
+    /**
+     * Expands a stack into its nested children: bundle contents, container
+     * contents, and, when a registry lookup is set, block-entity and custom-data
+     * item NBT, returned in slot order. Returns an empty list for an empty stack.
+     *
+     * @param stack stack to expand
+     * @return nested child stacks in slot order
+     */
     @Override
     public List<TraversalChild<ItemStack>> children(ItemStack stack) {
         Objects.requireNonNull(stack, "Item stack must not be null");

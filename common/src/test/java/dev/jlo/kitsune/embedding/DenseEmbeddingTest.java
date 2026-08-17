@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/** Verifies {@link DenseEmbedding} encode/decode round-tripping, norms, cosine similarity, and validation. */
 final class DenseEmbeddingTest {
     @Test
     void roundTripsFiniteComponentsAndNorm() {

@@ -5,6 +5,28 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Immutable settings configuring an OpenAI-compatible embedding provider.
+ *
+ * <p>Values are validated on construction; unsupported endpoint schemes,
+ * out-of-range limits, and missing required values are rejected.
+ *
+ * @param endpoint            base endpoint of the embedding HTTP API, using
+ *                            HTTPS unless loopback HTTP is explicitly allowed
+ * @param model               model name to request
+ * @param credentialReference reference used to resolve credentials, or empty
+ *                            when unauthenticated
+ * @param documentPrefix      prefix applied to document text before embedding
+ * @param queryPrefix         prefix applied to query text before embedding
+ * @param requestTimeout      per-request timeout, between 1ms and 60s
+ * @param maxBatchSize        maximum number of inputs per request
+ * @param maxResponseBytes    maximum accepted response payload size
+ * @param maxRequestBytes     maximum accepted request payload size
+ * @param maxRetries          number of retries for failed requests
+ * @param allowInsecureHttp   whether loopback HTTP is accepted for the endpoint
+ * @param dimensions          requested embedding dimensions, or {@code 0} for
+ *                            the model default
+ */
 public record OpenAiCompatibleEmbeddingSettings(
     URI endpoint,
     String model,
@@ -19,10 +41,15 @@ public record OpenAiCompatibleEmbeddingSettings(
     boolean allowInsecureHttp,
     int dimensions
 ) {
+    /** Maximum supported embedding dimensions. */
     public static final int MAX_DIMENSIONS = 16_384;
+    /** Maximum supported batch size. */
     public static final int MAX_BATCH_SIZE = 256;
+    /** Maximum accepted response payload size in bytes. */
     public static final int MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+    /** Maximum accepted request payload size in bytes. */
     public static final int MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+    /** Maximum supported number of retries. */
     public static final int MAX_RETRIES = 3;
 
     public OpenAiCompatibleEmbeddingSettings {
@@ -65,6 +92,18 @@ public record OpenAiCompatibleEmbeddingSettings(
         }
     }
 
+    /**
+     * Builds settings from a flat key/value map.
+     *
+     * <p>The {@code endpoint} and {@code model} keys are required; all other
+     * settings fall back to defaults when absent or blank.
+     *
+     * @param settings key/value settings to parse
+     * @return the parsed settings
+     * @throws NullPointerException     if the map is null
+     * @throws IllegalArgumentException if a required value is missing or any
+     *         value is invalid
+     */
     public static OpenAiCompatibleEmbeddingSettings from(Map<String, String> settings) {
         Objects.requireNonNull(settings, "Settings must not be null");
         URI endpoint = URI.create(requiredSetting(settings, "endpoint"));
@@ -95,6 +134,10 @@ public record OpenAiCompatibleEmbeddingSettings(
         );
     }
 
+    /**
+     * @return a representation of the settings affecting embedding output,
+     *         suitable for cache or fingerprint keying
+     */
     public String fingerprintMaterial() {
         return endpoint + "\n"
             + model + "\n"

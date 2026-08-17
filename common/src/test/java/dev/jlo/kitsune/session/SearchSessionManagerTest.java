@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/** Verifies search-session token, marker, expiry, and invalidation behavior. */
 class SearchSessionManagerTest {
     @Test
     void beginReturnsMonotonicTokensForEachPlayerAndTracksCurrentTokens() {

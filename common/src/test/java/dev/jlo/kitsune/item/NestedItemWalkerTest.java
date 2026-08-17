@@ -15,8 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Verifies normal nested-item traversal and traversal limits. */
 class NestedItemWalkerTest {
 
+    /** Represents a child node at a slot in a test tree. */
     record TestChild(int slot, TestTree node) {
         TestChild {
             if (slot < 0) throw new IllegalArgumentException("Slot must not be negative");
@@ -28,6 +30,7 @@ class NestedItemWalkerTest {
         }
     }
 
+    /** Minimal tree node used by the traversal tests. */
     static final class TestTree {
         final String label;
         final int amount = 1;

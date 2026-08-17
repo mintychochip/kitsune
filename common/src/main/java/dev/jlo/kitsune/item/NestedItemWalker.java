@@ -11,16 +11,19 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+/** Traverses nested item trees with depth, count, and cycle safeguards. */
 public final class NestedItemWalker<T> {
 
     private final TraversalLimits limits;
     private final TraversalAdapter<T> adapter;
 
+    /** Creates a walker using the supplied limits and adapter. */
     public NestedItemWalker(TraversalLimits limits, TraversalAdapter<T> adapter) {
         this.limits = Objects.requireNonNull(limits, "Limits must not be null");
         this.adapter = Objects.requireNonNull(adapter, "Adapter must not be null");
     }
 
+    /** Walks from a root child and returns the collected leaf drafts. */
     public NestedItemWalkResult walk(TraversalChild<T> root) {
         Objects.requireNonNull(root, "Root must not be null");
         List<ItemDraft> leaves = new ArrayList<>();
