@@ -84,14 +84,14 @@ class ContainerIndexLoadedRootRestorationTest {
     }
 
     /**
-     * A superseded (stale) completion does not restore the loaded root.
+     * A delete issued while a snapshot is in flight prevents restoration.
      */
     @Test
-    void staleCompletionDoesNotRestoreLoadedRoot() throws Exception {
+    void deleteDuringInFlightSnapshotPreventsRestore() throws Exception {
         try (Fixture fixture = new Fixture()) {
             fixture.finishInitialIndexing();
             fixture.removeAndBlockReplacement();
-            fixture.index.markDirty(fixture.root);
+            fixture.index.delete(fixture.root);
 
             fixture.repository.releaseBlockedReplacement();
             fixture.repository.awaitReplacement();

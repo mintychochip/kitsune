@@ -212,6 +212,13 @@ public final class ContainerIndex implements AutoCloseable {
         }
     }
 
+    public void markTransferDirty(BlockKey root) {
+        Objects.requireNonNull(root, "Root key");
+        if (accepting) {
+            tracker.markTransferDirty(root, requireTick(currentTick.getAsLong()));
+        }
+    }
+
     /**
      * Marks a root for deletion from the index and repository.
      *
@@ -232,6 +239,10 @@ public final class ContainerIndex implements AutoCloseable {
      */
     public void markDirty(InventoryHolder holder) {
         canonicalRoot(holder).ifPresent(this::markDirty);
+    }
+
+    public void markTransferDirty(InventoryHolder holder) {
+        canonicalRoot(holder).ifPresent(this::markTransferDirty);
     }
 
     /**
@@ -500,7 +511,7 @@ public final class ContainerIndex implements AutoCloseable {
         }
         if (failure == null) {
             replacementRequired.remove(rootWork.key());
-            tracker.complete(pending);
+            tracker.complete(pending, tick);
             if (
                 pending.action() == PendingAction.SNAPSHOT
                 && canonicalRoot != null

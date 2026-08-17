@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies dirty-root coalescing, revision tracking, retry delays, and due ordering.
+ */
 class DirtyRootTrackerTest {
     private static final UUID WORLD_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID WORLD_ID_TWO = UUID.fromString("00000000-0000-0000-0000-000000000002");
@@ -57,20 +60,50 @@ class DirtyRootTrackerTest {
     }
 
     @Test
-    void staleCompletionCannotEraseNewerDueRevision() {
+    void dirtyDuringClaimedSnapshotSchedulesFollowUpWithoutStalingInFlightRevision() {
         DirtyRootTracker tracker = new DirtyRootTracker();
         BlockKey root = key(WORLD_ID, 2, 64, 0);
 
         tracker.markDirty(root, 1L);
-        PendingRoot stale = assertSingleDue(tracker, 2L);
+        PendingRoot inFlight = assertSingleDue(tracker, 2L);
         tracker.markDirty(root, 3L);
 
-        assertFalse(tracker.complete(stale));
+        assertTrue(tracker.isCurrent(inFlight));
+        assertTrue(tracker.claimDue(4L).isEmpty());
+        assertTrue(tracker.complete(inFlight, 3L));
 
-        PendingRoot current = assertSingleDue(tracker, 4L);
+        PendingRoot followUp = assertSingleDue(tracker, 4L);
+        assertEquals(2L, followUp.revision());
+        assertEquals(PendingAction.SNAPSHOT, followUp.action());
+    }
 
-        assertEquals(2L, current.revision());
-        assertEquals(PendingAction.SNAPSHOT, current.action());
+    @Test
+    void transferDirtyIsDueFiveTicksLaterAndExtendsWithEachMove() {
+        DirtyRootTracker tracker = new DirtyRootTracker();
+        BlockKey root = key(WORLD_ID, 7, 64, 0);
+
+        tracker.markTransferDirty(root, 100L);
+        assertTrue(tracker.claimDue(104L).isEmpty());
+        tracker.markTransferDirty(root, 101L);
+        assertTrue(tracker.claimDue(105L).isEmpty());
+
+        PendingRoot due = assertSingleDue(tracker, 106L);
+        assertEquals(root, due.key());
+        assertEquals(PendingAction.SNAPSHOT, due.action());
+    }
+
+    @Test
+    void transferDirtyDoesNotWaitLongerThanTwentyTicksFromFirstUnclaimedDirty() {
+        DirtyRootTracker tracker = new DirtyRootTracker();
+        BlockKey root = key(WORLD_ID, 8, 64, 0);
+
+        tracker.markTransferDirty(root, 100L);
+        tracker.markTransferDirty(root, 119L);
+        assertTrue(tracker.claimDue(119L).isEmpty());
+
+        PendingRoot due = assertSingleDue(tracker, 120L);
+        assertEquals(root, due.key());
+        assertEquals(PendingAction.SNAPSHOT, due.action());
     }
 
     @Test
@@ -80,7 +113,7 @@ class DirtyRootTrackerTest {
         tracker.markDirty(root, 1L);
         PendingRoot first = assertSingleDue(tracker, 2L);
 
-        assertTrue(tracker.complete(first));
+        assertTrue(tracker.complete(first, 2L));
         tracker.markDeleted(root, 3L);
 
         PendingRoot second = assertSingleDue(tracker, 4L);
@@ -170,7 +203,7 @@ class DirtyRootTrackerTest {
 
         assertThrows(NullPointerException.class, () -> tracker.markDirty(null, 1L));
         assertThrows(NullPointerException.class, () -> tracker.markDeleted(null, 1L));
-        assertThrows(NullPointerException.class, () -> tracker.complete(null));
+        assertThrows(NullPointerException.class, () -> tracker.complete(null, 1L));
         assertThrows(NullPointerException.class, () -> tracker.fail(null, 1L));
 
         assertThrows(IllegalArgumentException.class, () -> tracker.markDirty(root, -1L));
