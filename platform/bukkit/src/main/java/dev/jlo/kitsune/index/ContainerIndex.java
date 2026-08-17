@@ -6,7 +6,7 @@ import dev.jlo.kitsune.model.ChunkKey;
 import dev.jlo.kitsune.model.ContainerDraft;
 import dev.jlo.kitsune.model.ContainerSnapshot;
 import dev.jlo.kitsune.model.IndexedItem;
-import dev.jlo.kitsune.model.ItemDraft;
+import dev.jlo.kitsune.model.RootIdentity;
 
 import org.bukkit.Chunk;
 import org.bukkit.World;
@@ -16,7 +16,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +32,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.function.Consumer;
 
+/**
+ * Maintains the in-memory index of loaded container roots, driving discovery,
+ * snapshots, replacement writes, and reconciliation against the repository.
+ */
 public final class ContainerIndex implements AutoCloseable {
     private final ContainerIndexQueue queue;
     private final RootResolver<Inventory> rootResolver;
@@ -44,17 +48,34 @@ public final class ContainerIndex implements AutoCloseable {
     private final int rootsPerTick;
     private final int reconciliationPeriodTicks;
     private final Consumer<BlockKey> rootInvalidated;
+    private final CachedEmbeddingResolver embeddings = new CachedEmbeddingResolver();
     private final AtomicLong chunkRevision = new AtomicLong();
     private final Map<ChunkKey, Chunk> loadedChunks = new LinkedHashMap<>();
     private final Map<ChunkKey, Set<BlockKey>> rootsByChunk =
         new LinkedHashMap<>();
     private final Set<BlockKey> loadedRoots = new LinkedHashSet<>();
+    private final Set<BlockKey> replacementRequired = new LinkedHashSet<>();
     private final Queue<CompletionAction> completions =
         new ConcurrentLinkedQueue<>();
     private ReconciliationCursor reconciliationCursor;
     private long nextReconciliationTick;
     private volatile boolean accepting = true;
 
+    /**
+     * Creates an index bound to the supplied resolution, snapshotting, indexing,
+     * and repository services with the given per-tick and reconciliation limits.
+     *
+     * @param rootResolver resolves logical container inventories
+     * @param snapshotter captures container snapshots
+     * @param worker performs background index work
+     * @param repository persistent index repository
+     * @param embeddingProvider embeds item descriptors
+     * @param chunksPerTick maximum chunks discovered per tick
+     * @param rootsPerTick maximum roots processed per tick
+     * @param reconciliationPeriodTicks ticks between reconciliation passes
+     * @param currentTick supplies the current server tick
+     * @param rootInvalidated callback invoked when a root becomes invalid
+     */
     public ContainerIndex(
         RootResolver<Inventory> rootResolver,
         ContainerSnapshotter snapshotter,
@@ -101,11 +122,21 @@ public final class ContainerIndex implements AutoCloseable {
         );
     }
 
+    /**
+     * Prevents new work from being accepted by the index.
+     */
     public void stopAccepting() {
         accepting = false;
         queue.stopAccepting();
     }
 
+    /**
+     * Returns a stage completing when the requested chunks are ready or a timeout elapses.
+     *
+     * @param chunks chunks to await readiness for
+     * @param timeout maximum wait duration
+     * @return a stage completed when readiness is achieved
+     */
     public CompletionStage<Void> awaitReady(
         Set<ChunkKey> chunks,
         Duration timeout
@@ -118,6 +149,11 @@ public final class ContainerIndex implements AutoCloseable {
         return queue.awaitReady(chunks, timeout);
     }
 
+    /**
+     * Registers a loaded chunk for discovery.
+     *
+     * @param chunk loaded chunk
+     */
     public void onChunkLoaded(Chunk chunk) {
         Objects.requireNonNull(chunk, "Chunk");
         if (!accepting) return;
@@ -136,6 +172,11 @@ public final class ContainerIndex implements AutoCloseable {
         queue.enqueueChunk(key);
     }
 
+    /**
+     * Unregisters a chunk and marks its roots unavailable.
+     *
+     * @param chunk unloaded chunk key
+     */
     public void onChunkUnloaded(ChunkKey chunk) {
         Objects.requireNonNull(chunk, "Chunk key");
         loadedChunks.remove(chunk);
@@ -158,6 +199,11 @@ public final class ContainerIndex implements AutoCloseable {
         });
     }
 
+    /**
+     * Marks a root as dirty, scheduling it for resnapshotting.
+     *
+     * @param root root to invalidate
+     */
     public void markDirty(BlockKey root) {
         Objects.requireNonNull(root, "Root key");
         if (accepting) {
@@ -166,29 +212,60 @@ public final class ContainerIndex implements AutoCloseable {
         }
     }
 
+    /**
+     * Marks a root for deletion from the index and repository.
+     *
+     * @param root root to delete
+     */
     public void delete(BlockKey root) {
         Objects.requireNonNull(root, "Root key");
         if (!accepting) return;
         removeLoadedRoot(root);
+        replacementRequired.add(root);
         tracker.markDeleted(root, requireTick(currentTick.getAsLong()));
     }
 
+    /**
+     * Marks the canonical root of a holder's inventory dirty, when determinable.
+     *
+     * @param holder inventory holder to invalidate
+     */
     public void markDirty(InventoryHolder holder) {
         canonicalRoot(holder).ifPresent(this::markDirty);
     }
 
+    /**
+     * Marks the canonical root of a holder's inventory for deletion.
+     *
+     * @param holder inventory holder to delete
+     */
     public void delete(InventoryHolder holder) {
         canonicalRoot(holder).ifPresent(this::delete);
     }
 
+    /**
+     * Returns whether a chunk has been fully processed and made ready.
+     *
+     * @param chunk chunk to query
+     * @return {@code true} when the chunk is ready
+     */
     public boolean isChunkReady(ChunkKey chunk) {
         return queue.isReady(chunk);
     }
 
+    /**
+     * Returns an immutable view of currently loaded root keys.
+     *
+     * @return loaded root keys
+     */
     public Set<BlockKey> loadedRoots() {
         return Set.copyOf(loadedRoots);
     }
 
+    /**
+     * Advances the index by one server tick: drains completions, reconciles,
+     * claims tracker work, and processes the queued chunk and root batches.
+     */
     public void tick() {
         if (!accepting) return;
         long tick = requireTick(currentTick.getAsLong());
@@ -351,16 +428,24 @@ public final class ContainerIndex implements AutoCloseable {
         ContainerIndexQueue.RootWork rootWork,
         ContainerDraft draft
     ) {
+        boolean forceReplacement = replacementRequired.contains(rootWork.key());
         worker.submit(() -> {
-            List<IndexedItem> items = new ArrayList<>(draft.items().size());
-            for (ItemDraft item : draft.items()) {
-                items.add(new IndexedItem(
-                    item.path(),
-                    item.amount(),
-                    item.descriptor(),
-                    embeddingProvider.embed(item.descriptor())
-                ));
+            Optional<RootIdentity> existing = repository.findRoot(draft.key());
+            if (
+                !forceReplacement
+                && rootWork.key().equals(draft.key())
+                && existing.isPresent()
+                && existing.get().blockType().equals(draft.blockType())
+                && Arrays.equals(existing.get().fingerprint(), draft.fingerprint())
+            ) {
+                return null;
             }
+
+            List<IndexedItem> items = embeddings.resolve(
+                draft.items(),
+                embeddingProvider,
+                repository
+            );
             ContainerSnapshot snapshot = new ContainerSnapshot(
                 draft.key(),
                 draft.blockType(),
@@ -414,6 +499,7 @@ public final class ContainerIndex implements AutoCloseable {
             return;
         }
         if (failure == null) {
+            replacementRequired.remove(rootWork.key());
             tracker.complete(pending);
             if (
                 pending.action() == PendingAction.SNAPSHOT
@@ -501,6 +587,9 @@ public final class ContainerIndex implements AutoCloseable {
         }
     }
 
+    /**
+     * Stops accepting work and releases in-memory state.
+     */
     @Override
     public void close() {
         stopAccepting();

@@ -39,8 +39,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies how the container index restores, invalidates, and reconciles
+ * loaded roots across the indexing worker and repository lifecycle.
+ */
 class ContainerIndexLoadedRootRestorationTest {
 
+    /**
+     * A successful, current snapshot restores the previously loaded root.
+     */
     @Test
     void successfulCurrentSnapshotRestoresLoadedRoot() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -56,6 +63,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * An unchanged snapshot skips both repository replacement and embedding.
+     */
     @Test
     void unchangedSnapshotSkipsReplacementAndEmbedding() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -73,6 +83,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * A superseded (stale) completion does not restore the loaded root.
+     */
     @Test
     void staleCompletionDoesNotRestoreLoadedRoot() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -89,6 +102,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * An unloaded chunk blocks restoration of the loaded root.
+     */
     @Test
     void unloadedChunkBlocksRestoration() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -105,6 +121,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Deleting a root invalidates its loaded status before repository work.
+     */
     @Test
     void deleteInvalidatesLoadedRootBeforeRepositoryWork() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -116,6 +135,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Chunk unload invalidates every known loaded root immediately.
+     */
     @Test
     void chunkUnloadInvalidatesEveryKnownRootImmediately() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -127,6 +149,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Marking a root dirty invalidates its published markers immediately.
+     */
     @Test
     void dirtyRootInvalidatesItsPublishedMarkersImmediately() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -138,6 +163,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * An unavailable snapshot preserves the persisted root without deleting it.
+     */
     @Test
     void unavailableSnapshotPreservesThePersistedRoot() throws Exception {
         BlockKey root = new BlockKey(UUID.randomUUID(), 0, 64, 0);
@@ -174,6 +202,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Unloading a chunk before the delayed snapshot preserves committed data.
+     */
     @Test
     void unloadingBeforeDelayedSnapshotPreservesCommittedData()
         throws Exception {
@@ -193,6 +224,9 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Canonical replacement deletes the obsolete requested coordinate root.
+     */
     @Test
     void canonicalReplacementDeletesTheObsoleteRequestedCoordinate()
         throws Exception {
@@ -241,6 +275,10 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * Builds a fully-wired {@link ContainerIndex} together with a blocking
+     * repository, worker, and tick source for exercising restoration flows.
+     */
     private static final class Fixture implements AutoCloseable {
         private final UUID worldId = UUID.randomUUID();
         private final BlockKey root = new BlockKey(worldId, 0, 64, 0);
@@ -304,6 +342,10 @@ class ContainerIndexLoadedRootRestorationTest {
         }
     }
 
+    /**
+     * An {@link IndexRepository} whose replacements can be blocked and released
+     * to simulate in-flight repository work.
+     */
     private static final class BlockingRepository implements IndexRepository {
         private final Semaphore replacements = new Semaphore(0);
         private final ConcurrentLinkedQueue<BlockKey> replacedRoots =
@@ -311,6 +353,8 @@ class ContainerIndexLoadedRootRestorationTest {
         private final ConcurrentLinkedQueue<BlockKey> deletedRoots =
             new ConcurrentLinkedQueue<>();
         private final Map<BlockKey, RootIdentity> storedRoots =
+            new ConcurrentHashMap<>();
+        private final Map<SemanticDescriptorHash, Embedding> storedEmbeddings =
             new ConcurrentHashMap<>();
         private volatile CountDownLatch blockedReplacementStarted;
         private volatile CountDownLatch blockedReplacementRelease;
@@ -417,14 +461,23 @@ class ContainerIndexLoadedRootRestorationTest {
             EmbeddingProvider provider,
             Set<SemanticDescriptorHash> hashes
         ) {
-            return Map.of();
+            Map<SemanticDescriptorHash, Embedding> found = new java.util.LinkedHashMap<>();
+            for (SemanticDescriptorHash hash : hashes) {
+                Embedding embedding = storedEmbeddings.get(hash);
+                if (embedding != null) {
+                    found.put(hash, embedding);
+                }
+            }
+            return Map.copyOf(found);
         }
 
         @Override
         public void putEmbeddings(
             EmbeddingProvider provider,
             Map<SemanticDescriptorHash, Embedding> embeddings
-        ) {}
+        ) {
+            storedEmbeddings.putAll(embeddings);
+        }
 
         @Override
         public Map<BlockKey, List<IndexedItem>> loadDocuments(
@@ -441,6 +494,10 @@ class ContainerIndexLoadedRootRestorationTest {
         public void close() {}
     }
 
+    /**
+     * An {@link EmbeddingProvider} that counts every embed call, delegating
+     * the actual computation to a sparse-tag provider.
+     */
     private static final class CountingEmbeddingProvider
         implements EmbeddingProvider {
         private final EmbeddingProvider delegate = new SparseTagEmbeddingProvider();
@@ -464,6 +521,12 @@ class ContainerIndexLoadedRootRestorationTest {
         public Embedding embed(ItemDescriptor descriptor) {
             embedCalls.incrementAndGet();
             return delegate.embed(descriptor);
+        }
+
+        @Override
+        public List<Embedding> embedAll(List<ItemDescriptor> descriptors) {
+            embedCalls.addAndGet(descriptors.size());
+            return delegate.embedAll(descriptors);
         }
 
         @Override
