@@ -1,6 +1,7 @@
 package dev.jlo.kitsune.index;
 
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
+import dev.jlo.kitsune.api.embedding.Embedding;
 import dev.jlo.kitsune.embedding.SparseTagEmbeddingProvider;
 import dev.jlo.kitsune.item.BukkitTraversalAdapter;
 import dev.jlo.kitsune.item.NestedItemWalker;
@@ -9,6 +10,7 @@ import dev.jlo.kitsune.model.BlockKey;
 import dev.jlo.kitsune.model.ChunkKey;
 import dev.jlo.kitsune.model.ContainerSnapshot;
 import dev.jlo.kitsune.model.IndexedItem;
+import dev.jlo.kitsune.model.ItemDescriptor;
 import dev.jlo.kitsune.model.RootIdentity;
 import org.bukkit.Chunk;
 import org.bukkit.Server;
@@ -26,11 +28,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,6 +52,23 @@ class ContainerIndexLoadedRootRestorationTest {
             fixture.awaitWorker();
             fixture.tick(4L);
 
+            assertEquals(Set.of(fixture.root), fixture.index.loadedRoots());
+        }
+    }
+
+    @Test
+    void unchangedSnapshotSkipsReplacementAndEmbedding() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.finishInitialIndexing();
+            int initialEmbeddings = fixture.embeddingProvider.embedCalls();
+
+            fixture.index.markDirty(fixture.root);
+            fixture.tick(3L);
+            fixture.awaitWorker();
+            fixture.tick(4L);
+
+            assertEquals(List.of(fixture.root), fixture.repository.replacedRoots());
+            assertEquals(initialEmbeddings, fixture.embeddingProvider.embedCalls());
             assertEquals(Set.of(fixture.root), fixture.index.loadedRoots());
         }
     }
@@ -225,6 +246,8 @@ class ContainerIndexLoadedRootRestorationTest {
         private final BlockKey root = new BlockKey(worldId, 0, 64, 0);
         private final AtomicLong currentTick = new AtomicLong();
         private final BlockingRepository repository = new BlockingRepository();
+        private final CountingEmbeddingProvider embeddingProvider =
+            new CountingEmbeddingProvider();
         private final IndexWorker worker = new IndexWorker(repository);
         private final List<BlockKey> invalidatedRoots = new ArrayList<>();
         private final ContainerIndex index;
@@ -232,7 +255,6 @@ class ContainerIndexLoadedRootRestorationTest {
         private Fixture() {
             RootResolver<Inventory> resolver = rootResolver(root);
             ContainerSnapshotter snapshotter = snapshotter(resolver);
-            EmbeddingProvider embeddingProvider = new SparseTagEmbeddingProvider();
             index = new ContainerIndex(
                 resolver,
                 snapshotter,
@@ -288,6 +310,8 @@ class ContainerIndexLoadedRootRestorationTest {
             new ConcurrentLinkedQueue<>();
         private final ConcurrentLinkedQueue<BlockKey> deletedRoots =
             new ConcurrentLinkedQueue<>();
+        private final Map<BlockKey, RootIdentity> storedRoots =
+            new ConcurrentHashMap<>();
         private volatile CountDownLatch blockedReplacementStarted;
         private volatile CountDownLatch blockedReplacementRelease;
 
@@ -351,25 +375,56 @@ class ContainerIndexLoadedRootRestorationTest {
                 blockedReplacementStarted = null;
                 blockedReplacementRelease = null;
             }
+            storedRoots.put(
+                snapshot.key(),
+                new RootIdentity(
+                    snapshot.key(),
+                    snapshot.blockType(),
+                    snapshot.fingerprint(),
+                    revision
+                )
+            );
             replacedRoots.add(snapshot.key());
             replacements.release();
         }
 
         @Override
         public void deleteRoot(BlockKey key) {
+            storedRoots.remove(key);
             deletedRoots.add(key);
         }
 
         @Override
-        public List<RootIdentity> findCandidates(
+        public IndexRepository.CandidatePage findCandidates(
             UUID worldId,
             int minChunkX,
             int maxChunkX,
             int minChunkZ,
-            int maxChunkZ
+            int maxChunkZ,
+            IndexRepository.CandidateCursor after,
+            int limit
         ) {
-            return List.of();
+            return new IndexRepository.CandidatePage(List.of(), null);
         }
+
+        @Override
+        public java.util.Optional<RootIdentity> findRoot(BlockKey key) {
+            return java.util.Optional.ofNullable(storedRoots.get(key));
+        }
+
+        @Override
+        public Map<SemanticDescriptorHash, Embedding> findEmbeddings(
+            EmbeddingProvider provider,
+            Set<SemanticDescriptorHash> hashes
+        ) {
+            return Map.of();
+        }
+
+        @Override
+        public void putEmbeddings(
+            EmbeddingProvider provider,
+            Map<SemanticDescriptorHash, Embedding> embeddings
+        ) {}
 
         @Override
         public Map<BlockKey, List<IndexedItem>> loadDocuments(
@@ -384,6 +439,42 @@ class ContainerIndexLoadedRootRestorationTest {
 
         @Override
         public void close() {}
+    }
+
+    private static final class CountingEmbeddingProvider
+        implements EmbeddingProvider {
+        private final EmbeddingProvider delegate = new SparseTagEmbeddingProvider();
+        private final AtomicInteger embedCalls = new AtomicInteger();
+
+        int embedCalls() {
+            return embedCalls.get();
+        }
+
+        @Override
+        public String id() {
+            return delegate.id();
+        }
+
+        @Override
+        public int version() {
+            return delegate.version();
+        }
+
+        @Override
+        public Embedding embed(ItemDescriptor descriptor) {
+            embedCalls.incrementAndGet();
+            return delegate.embed(descriptor);
+        }
+
+        @Override
+        public Embedding embedQuery(String query) {
+            return delegate.embedQuery(query);
+        }
+
+        @Override
+        public Embedding decode(byte[] payload, double norm) {
+            return delegate.decode(payload, norm);
+        }
     }
 
     private static RootResolver<Inventory> rootResolver(BlockKey root) {

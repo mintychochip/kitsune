@@ -6,6 +6,7 @@ import dev.jlo.kitsune.command.SearchRequest;
 import dev.jlo.kitsune.index.IndexWarmupTimeoutException;
 import dev.jlo.kitsune.index.IndexWorker;
 import dev.jlo.kitsune.index.IndexRepository;
+import dev.jlo.kitsune.index.SemanticDescriptorHash;
 import dev.jlo.kitsune.model.BlockKey;
 import dev.jlo.kitsune.model.ChunkKey;
 import dev.jlo.kitsune.model.IndexedItem;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -138,6 +140,47 @@ class SearchServiceTest {
             assertEquals(2, outcome.roots().size());
             assertEquals(2, outcome.totalAccessibleMatchingRoots());
             assertEquals(Set.of(topOne.identity().key(), topTwo.identity().key()), harness.loadedDocumentKeys());
+        }
+    }
+
+    @Test
+    void emptyCandidatePageContinuesWhenCursorExists() throws Exception {
+        RootSeed packed = seedRoot(0, 64, 0, false, false, scoreMatch("a", 0.95, 0));
+
+        try (SearchHarness harness = SearchHarness.create(defaultPolicy(), packed)
+            .emptyFirstCandidatePage()) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(1, outcome.totalAccessibleMatchingRoots());
+            assertEquals(packed.identity().key(), outcome.roots().getFirst().key());
+            assertEquals(2, harness.findCandidateCalls());
+            assertEquals(List.of(0, 1), harness.candidatePageSizes());
+        }
+    }
+
+    @Test
+    void candidatePagesKeepGlobalCountsAndBestRoot() throws Exception {
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1));
+        List<RootSeed> roots = new ArrayList<>();
+        for (int index = 0; index < 129; index++) {
+            double score = index == 128 ? 0.99 : 0.80;
+            roots.add(seedRoot(0, 64 + index, 0, false, false,
+                scoreMatch("item-" + index, score, index)));
+        }
+        RootSeed lateBest = roots.get(128);
+
+        try (SearchHarness harness = SearchHarness.create(policy, roots)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(129, outcome.totalAccessibleMatchingRoots());
+            assertEquals(129, outcome.totalAccessibleMatchingStacks());
+            assertEquals(lateBest.identity().key(), outcome.roots().getFirst().key());
+            assertEquals(2, harness.findCandidateCalls());
+            assertEquals(2, harness.loadDocumentCalls());
+            assertEquals(List.of(128, 1), harness.candidatePageSizes());
+            assertEquals(List.of(128, 1), harness.validationBatchSizes());
         }
     }
 
@@ -321,11 +364,14 @@ class SearchServiceTest {
         static SearchHarness create(SearchPolicy policy, RootSeed... roots) {
             return create(policy, Arrays.asList(roots));
         }
-
         static SearchHarness create(SearchPolicy policy, List<RootSeed> roots) {
             AtomicLong generation = new AtomicLong(0);
+            ValidationBatchRecorder validationBatches = new ValidationBatchRecorder();
             FakeIndexReadiness readiness = new FakeIndexReadiness();
-            FakeLiveRootAccess live = new FakeLiveRootAccess(Set.of(new ChunkKey(WORLD_ID, 0, 0)));
+            FakeLiveRootAccess live = new FakeLiveRootAccess(
+                Set.of(new ChunkKey(WORLD_ID, 0, 0)),
+                validationBatches
+            );
             for (RootSeed root : roots) {
                 if (root.denied()) live.deny(root.identity().key());
                 if (root.stale()) live.stale(root.identity().key());
@@ -340,7 +386,7 @@ class SearchServiceTest {
                 worker,
                 repository,
                 embeddings,
-                new ImmediateServerThreadBridge(),
+                new ImmediateServerThreadBridge(validationBatches),
                 live,
                 policy
             );
@@ -363,6 +409,11 @@ class SearchServiceTest {
 
         SearchHarness withLoadedChunks(Set<ChunkKey> chunks) {
             live.setLoadedChunks(chunks);
+            return this;
+        }
+
+        SearchHarness emptyFirstCandidatePage() {
+            repository.emptyFirstPage();
             return this;
         }
 
@@ -425,6 +476,14 @@ class SearchServiceTest {
             return repository.loadDocumentCalls();
         }
 
+        List<Integer> validationBatchSizes() {
+            return live.validationBatchSizes();
+        }
+
+        List<Integer> candidatePageSizes() {
+            return repository.candidatePageSizes();
+        }
+
         List<Set<ChunkKey>> awaitedChunkRequests() {
             return readiness.awaitedChunks();
         }
@@ -461,16 +520,53 @@ class SearchServiceTest {
         }
     }
 
+    private static final class ValidationBatchRecorder {
+        private final ThreadLocal<Integer> current = new ThreadLocal<>();
+        private final List<Integer> completed = Collections.synchronizedList(new ArrayList<>());
+
+        void begin() {
+            current.set(0);
+        }
+
+        void recordValidation() {
+            Integer count = current.get();
+            if (count == null) {
+                throw new IllegalStateException("Validation occurred outside server bridge operation");
+            }
+            current.set(count + 1);
+        }
+
+        void finish() {
+            Integer count = current.get();
+            current.remove();
+            if (count != null && count > 0) {
+                completed.add(count);
+            }
+        }
+
+        List<Integer> completed() {
+            return List.copyOf(completed);
+        }
+    }
+
     private static final class FakeLiveRootAccess implements LiveRootAccess {
         private Set<ChunkKey> loadedChunks;
+        private final ValidationBatchRecorder validationBatches;
         private final Set<BlockKey> deniedRoots = Collections.synchronizedSet(new LinkedHashSet<>());
         private final Set<BlockKey> staleRoots = Collections.synchronizedSet(new LinkedHashSet<>());
         private final Set<BlockKey> validated = Collections.synchronizedSet(new LinkedHashSet<>());
         private final AtomicReference<CompletableFuture<Void>> validationGate = new AtomicReference<>();
         private final CompletableFuture<Void> validationStarted = new CompletableFuture<>();
 
-        FakeLiveRootAccess(Set<ChunkKey> loadedChunks) {
+        FakeLiveRootAccess(
+            Set<ChunkKey> loadedChunks,
+            ValidationBatchRecorder validationBatches
+        ) {
             this.loadedChunks = Objects.requireNonNull(loadedChunks, "loaded chunks");
+            this.validationBatches = Objects.requireNonNull(
+                validationBatches,
+                "validation batches"
+            );
             validationGate.set(CompletableFuture.completedFuture(null));
         }
 
@@ -485,6 +581,7 @@ class SearchServiceTest {
 
         @Override
         public AllowedRoot validate(SearchContext context, RootIdentity identity, int radius) {
+            validationBatches.recordValidation();
             validated.add(identity.key());
             if (deniedRoots.contains(identity.key()) || staleRoots.contains(identity.key())) {
                 return null;
@@ -510,6 +607,10 @@ class SearchServiceTest {
             return Collections.unmodifiableSet(new LinkedHashSet<>(validated));
         }
 
+        List<Integer> validationBatchSizes() {
+            return validationBatches.completed();
+        }
+
         void pauseValidation() {
             validationGate.set(new CompletableFuture<>());
         }
@@ -532,13 +633,20 @@ class SearchServiceTest {
         private final Set<BlockKey> loadedKeys = Collections.synchronizedSet(new LinkedHashSet<>());
         private final List<RootIdentity> candidates;
         private final DeterministicEmbeddingProvider embeddings;
+        private final List<Integer> pageSizes = Collections.synchronizedList(new ArrayList<>());
+        private volatile boolean emptyFirstPage;
         private volatile int findCalls;
         private volatile int loadCalls;
-
         FakeIndexRepository(List<RootSeed> roots, DeterministicEmbeddingProvider embeddings) {
             this.embeddings = embeddings;
-            this.candidates = roots.stream().map(RootSeed::identity).toList();
-
+            this.candidates = roots.stream()
+                .map(RootSeed::identity)
+                .sorted(Comparator
+                    .comparing((RootIdentity root) -> root.key().worldId())
+                    .thenComparingInt(root -> root.key().x())
+                    .thenComparingInt(root -> root.key().y())
+                    .thenComparingInt(root -> root.key().z()))
+                .toList();
             for (RootSeed seed : roots) {
                 List<CandidateItem> stored = seed.matches().stream()
                     .map(match -> new CandidateItem(
@@ -563,6 +671,14 @@ class SearchServiceTest {
 
         int loadDocumentCalls() {
             return loadCalls;
+        }
+
+        List<Integer> candidatePageSizes() {
+            return List.copyOf(pageSizes);
+        }
+
+        void emptyFirstPage() {
+            emptyFirstPage = true;
         }
 
         @Override
@@ -591,13 +707,75 @@ class SearchServiceTest {
         }
 
         @Override
-        public List<RootIdentity> findCandidates(UUID worldId,
+        public IndexRepository.CandidatePage findCandidates(
+                                                UUID worldId,
                                                 int minChunkX,
                                                 int maxChunkX,
                                                 int minChunkZ,
-                                                int maxChunkZ) {
+                                                int maxChunkZ,
+                                                IndexRepository.CandidateCursor after,
+                                                int limit) {
             findCalls += 1;
-            return candidates;
+            if (emptyFirstPage && findCalls == 1) {
+                emptyFirstPage = false;
+                pageSizes.add(0);
+                return new IndexRepository.CandidatePage(
+                    List.of(),
+                    new IndexRepository.CandidateCursor(-1, Integer.MIN_VALUE, Integer.MIN_VALUE)
+                );
+            }
+            int start = 0;
+            if (after != null) {
+                while (start < candidates.size()
+                        && compareCursor(candidates.get(start), after) <= 0) {
+                    start++;
+                }
+            }
+            int end = Math.min(start + limit, candidates.size());
+            List<RootIdentity> page = List.copyOf(candidates.subList(start, end));
+            pageSizes.add(page.size());
+            IndexRepository.CandidateCursor next = end < candidates.size() && !page.isEmpty()
+                ? cursor(page.getLast())
+                : null;
+            return new IndexRepository.CandidatePage(page, next);
+        }
+
+        @Override
+        public java.util.Optional<RootIdentity> findRoot(BlockKey key) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public Map<SemanticDescriptorHash, Embedding> findEmbeddings(
+                EmbeddingProvider provider,
+                Set<SemanticDescriptorHash> hashes
+        ) {
+            return Map.of();
+        }
+
+        @Override
+        public void putEmbeddings(
+                EmbeddingProvider provider,
+                Map<SemanticDescriptorHash, Embedding> embeddings
+        ) {}
+
+        private static int compareCursor(
+                RootIdentity root,
+                IndexRepository.CandidateCursor cursor
+        ) {
+            int x = Integer.compare(root.key().x(), cursor.x());
+            if (x != 0) return x;
+            int y = Integer.compare(root.key().y(), cursor.y());
+            if (y != 0) return y;
+            return Integer.compare(root.key().z(), cursor.z());
+        }
+
+        private static IndexRepository.CandidateCursor cursor(RootIdentity root) {
+            return new IndexRepository.CandidateCursor(
+                root.key().x(),
+                root.key().y(),
+                root.key().z()
+            );
         }
 
         @Override
@@ -647,12 +825,21 @@ class SearchServiceTest {
     }
 
     private static final class ImmediateServerThreadBridge implements ServerThreadBridge {
+        private final ValidationBatchRecorder validationBatches;
+
+        private ImmediateServerThreadBridge(ValidationBatchRecorder validationBatches) {
+            this.validationBatches = validationBatches;
+        }
+
         @Override
         public <T> CompletableFuture<T> supply(java.util.concurrent.Callable<T> operation) {
+            validationBatches.begin();
             try {
                 return CompletableFuture.completedFuture(operation.call());
             } catch (Exception failure) {
                 return CompletableFuture.failedFuture(failure);
+            } finally {
+                validationBatches.finish();
             }
         }
 

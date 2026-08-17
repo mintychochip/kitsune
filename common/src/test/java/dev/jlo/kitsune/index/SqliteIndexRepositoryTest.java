@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -167,11 +168,11 @@ class SqliteIndexRepositoryTest {
         Path database = tempDir.resolve("index.db");
         try (RepositoryTestFixture first = new RepositoryTestFixture(database)) {
             first.repository().migrate();
-            assertEquals(1, schemaVersion(first.connection()));
+            assertEquals(2, schemaVersion(first.connection()));
         }
         try (RepositoryTestFixture second = new RepositoryTestFixture(database)) {
             second.repository().migrate();
-            assertEquals(1, schemaVersion(second.connection()));
+            assertEquals(2, schemaVersion(second.connection()));
         }
     }
 
@@ -245,6 +246,85 @@ class SqliteIndexRepositoryTest {
     }
 
     @Test
+    void rootLookupReturnsPersistedIdentity(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("lookup.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            fixture.insertAvailable(root, "diamond");
+
+            RootIdentity identity = fixture.repository().findRoot(root).orElseThrow();
+
+            assertEquals(root, identity.key());
+            assertEquals("chest", identity.blockType());
+            assertArrayEquals(new byte[] {1, 2, 3}, identity.fingerprint());
+            assertEquals(1L, identity.revision());
+            assertTrue(fixture.repository().findRoot(fixture.key(16, 64, 0)).isEmpty());
+        }
+    }
+
+    @Test
+    void embeddingsRoundTripBySemanticHashAndIgnoreAmount(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("cache.db"))) {
+            EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+            ItemDescriptor one = ItemDescriptor.builder()
+                    .materialKey("minecraft:cobblestone")
+                    .amount(1)
+                    .build();
+            ItemDescriptor stack = ItemDescriptor.builder()
+                    .materialKey("minecraft:cobblestone")
+                    .amount(64)
+                    .build();
+            SemanticDescriptorHash hash = SemanticDescriptorHash.of(one);
+            Embedding embedded = provider.embed(one);
+
+            fixture.repository().putEmbeddings(provider, Map.of(hash, embedded));
+
+            Map<SemanticDescriptorHash, Embedding> found = fixture.repository().findEmbeddings(
+                    provider, Set.of(SemanticDescriptorHash.of(stack)));
+            assertEquals(1, found.size());
+            assertArrayEquals(embedded.encode(), found.get(hash).encode());
+            assertEquals(embedded.norm(), found.get(hash).norm(), 1e-9);
+        }
+    }
+
+    @Test
+    void embeddingsMissWhenProviderIdentityDiffers(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("cache-miss.db"))) {
+            EmbeddingProvider stored = new SparseTagEmbeddingProvider();
+            ItemDescriptor descriptor = ItemDescriptor.builder()
+                    .materialKey("minecraft:cobblestone")
+                    .amount(1)
+                    .build();
+            SemanticDescriptorHash hash = SemanticDescriptorHash.of(descriptor);
+            fixture.repository().putEmbeddings(stored, Map.of(hash, stored.embed(descriptor)));
+
+            EmbeddingProvider other = fixture.provider("other", 1);
+            assertTrue(fixture.repository().findEmbeddings(other, Set.of(hash)).isEmpty());
+        }
+    }
+
+    @Test
+    void migrateUpgradesV1DatabaseAndCreatesEmbeddingsTable(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("v1.db");
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
+             java.sql.Statement statement = connection.createStatement()) {
+            for (String sql : v1Statements()) {
+                statement.execute(sql);
+            }
+            statement.execute("INSERT INTO schema_metadata (key, value) VALUES ('schema_version', '1')");
+        }
+
+        try (IndexRepository ignored = SqliteIndexRepository.open(database);
+             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            assertEquals(2, schemaVersion(connection));
+            try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM embeddings");
+                 ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1));
+            }
+        }
+    }
+
+    @Test
     void deletionCascadesDocuments(@TempDir Path tempDir) throws Exception {
         try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("delete.db"))) {
             BlockKey root = fixture.key(0, 64, 0);
@@ -262,9 +342,90 @@ class SqliteIndexRepositoryTest {
             BlockKey outside = fixture.key(64, 64, 0);
             fixture.insertAvailable(inside, "diamond");
             fixture.insertAvailable(outside, "diamond");
-            List<RootIdentity> candidates = fixture.repository().findCandidates(
-                    inside.worldId(), -1, 1, -1, 1);
-            assertEquals(List.of(fixture.rootIdentity(inside, "diamond")), candidates);
+            IndexRepository.CandidatePage page = fixture.repository().findCandidates(
+                    inside.worldId(), -1, 1, -1, 1, null, 10);
+            assertEquals(List.of(fixture.rootIdentity(inside, "diamond")), page.roots());
+            assertEquals(null, page.next());
+        }
+    }
+
+    @Test
+    void candidatesUseKeysetPagesWithoutSkipsOrDuplicates(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("pages.db"))) {
+            UUID worldId = UUID.randomUUID();
+            BlockKey first = new BlockKey(worldId, 0, 64, 0);
+            BlockKey second = new BlockKey(worldId, 0, 65, 0);
+            BlockKey third = new BlockKey(worldId, 1, 64, 0);
+            fixture.insertAvailable(first, "first");
+            fixture.insertAvailable(second, "second");
+            fixture.insertAvailable(third, "third");
+
+            IndexRepository.CandidatePage firstPage = fixture.repository().findCandidates(
+                    worldId, -1, 2, -1, 1, null, 2);
+            IndexRepository.CandidatePage secondPage = fixture.repository().findCandidates(
+                    worldId, -1, 2, -1, 1, firstPage.next(), 2);
+
+            assertEquals(
+                    List.of(fixture.rootIdentity(first, "first"), fixture.rootIdentity(second, "second")),
+                    firstPage.roots()
+            );
+            assertEquals(List.of(fixture.rootIdentity(third, "third")), secondPage.roots());
+            assertEquals(null, secondPage.next());
+
+            List<RootIdentity> flattened = new ArrayList<>(firstPage.roots());
+            flattened.addAll(secondPage.roots());
+            assertEquals(
+                    List.of(
+                            fixture.rootIdentity(first, "first"),
+                            fixture.rootIdentity(second, "second"),
+                            fixture.rootIdentity(third, "third")
+                    ),
+                    flattened
+            );
+        }
+    }
+
+    @Test
+    void candidatePageRejectsNonPositiveLimit(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("limit.db"))) {
+            UUID worldId = UUID.randomUUID();
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> fixture.repository().findCandidates(
+                            worldId, -1, 1, -1, 1, null, 0)
+            );
+        }
+    }
+
+    @Test
+    void candidatePageQueryUsesChunkIndex(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("query-plan.db"))) {
+            String sql = "EXPLAIN QUERY PLAN " + SqliteIndexRepository.candidatePageSql(false);
+            List<String> details = new ArrayList<>();
+            try (PreparedStatement statement = fixture.connection().prepareStatement(sql)) {
+                statement.setString(1, UUID.randomUUID().toString());
+                statement.setInt(2, -10);
+                statement.setInt(3, 10);
+                statement.setInt(4, -10);
+                statement.setInt(5, 10);
+                statement.setInt(6, 129);
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) details.add(result.getString(4));
+                }
+            }
+            assertTrue(details.stream().anyMatch(detail -> detail.contains("containers_by_chunk")), details.toString());
+            assertTrue(
+                    details.stream().anyMatch(
+                            detail -> detail.contains("sqlite_autoindex_chunks_1")
+                    ),
+                    details.toString()
+            );
+            assertTrue(
+                    details.stream().noneMatch(
+                            detail -> detail.contains("sqlite_autoindex_containers_1")
+                    ),
+                    details.toString()
+            );
         }
     }
 
@@ -275,11 +436,13 @@ class SqliteIndexRepositoryTest {
         try (RepositoryTestFixture first = new RepositoryTestFixture(database)) {
             root = first.key(0, 64, 0);
             first.insertAvailable(root, "diamond");
-            assertFalse(first.repository().findCandidates(root.worldId(), 0, 0, 0, 0).isEmpty());
+            assertFalse(first.repository().findCandidates(
+                    root.worldId(), 0, 0, 0, 0, null, 10).roots().isEmpty());
         }
         try (RepositoryTestFixture second = new RepositoryTestFixture(database)) {
             second.repository().markAllChunksUnavailable();
-            assertTrue(second.repository().findCandidates(root.worldId(), 0, 0, 0, 0).isEmpty());
+            assertTrue(second.repository().findCandidates(
+                    root.worldId(), 0, 0, 0, 0, null, 10).roots().isEmpty());
         }
     }
 
@@ -675,6 +838,26 @@ class SqliteIndexRepositoryTest {
         @Override public double cosine(Embedding other) { return 0; }
         @Override public boolean equals(Object o) { return false; }
         @Override public int hashCode() { return System.identityHashCode(this); }
+    }
+
+    private static List<String> v1Statements() throws Exception {
+        try (var input = SqliteIndexRepository.class.getClassLoader()
+                .getResourceAsStream("db/migration/V1__initial.sql")) {
+            if (input == null) {
+                throw new IllegalStateException("Missing migration V1__initial.sql");
+            }
+            String sql = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n");
+            List<String> statements = new ArrayList<>();
+            for (String raw : sql.split(";")) {
+                String trimmed = raw.trim();
+                if (!trimmed.isEmpty()) {
+                    statements.add(trimmed);
+                }
+            }
+            return statements;
+        }
     }
 
     private static int schemaVersion(Connection connection) throws Exception {

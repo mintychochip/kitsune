@@ -26,15 +26,33 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * {@link IndexRepository} backed by a SQLite database.
+ *
+ * <p>The repository stores container roots, per-chunk availability, and
+ * embedding-backed searchable documents. It applies schema migrations on
+ * open, marks all persisted chunks unavailable, and optionally re-embeds
+ * documents when the configured provider identity differs. All mutations
+ * are committed transactionally where the operation requires it.
+ */
 public final class SqliteIndexRepository implements IndexRepository {
     private static final int LOAD_DOCUMENTS_BATCH = 200;
     private static final int REEMBED_BATCH = 256;
 
     private final Connection connection;
 
+    /**
+     * Creates a repository over an existing SQLite connection and configures
+     * WAL journaling and foreign-key enforcement.
+     *
+     * @param connection open SQLite connection
+     * @throws SQLException if connection configuration fails
+     */
     SqliteIndexRepository(Connection connection) throws SQLException {
         this.connection = connection;
         try (Statement statement = connection.createStatement()) {
@@ -43,10 +61,29 @@ public final class SqliteIndexRepository implements IndexRepository {
         }
     }
 
+    /**
+     * Opens (creating if necessary) the repository at the given path without
+     * re-embedding.
+     *
+     * @param path database file path
+     * @return an open, migrated repository
+     * @throws SQLException if the database cannot be opened or migrated
+     */
     public static IndexRepository open(Path path) throws SQLException {
         return open(path, null);
     }
 
+    /**
+     * Opens (creating if necessary) the repository at the given path, running
+     * migrations and optionally re-embedding documents whose provider identity
+     * differs from the supplied provider.
+     *
+     * @param path database file path
+     * @param provider embedding provider used to re-embed on identity mismatch,
+     *                  or {@code null} to skip re-embedding
+     * @return an open, migrated repository
+     * @throws SQLException if the database cannot be opened or migrated
+     */
     public static IndexRepository open(Path path, EmbeddingProvider provider) throws SQLException {
         Connection connection = null;
         try {
@@ -86,26 +123,28 @@ public final class SqliteIndexRepository implements IndexRepository {
         connection.setAutoCommit(true);
         Throwable primary = null;
         try {
-            try (Statement statement = connection.createStatement();
-                 ResultSet rs = statement.executeQuery("SELECT value FROM schema_metadata WHERE key = 'schema_version'")) {
-                if (rs.next()) {
-                    int version = rs.getInt(1);
-                    if (version != 1) {
-                        throw new SQLException("Unsupported schema version: " + version);
-                    }
-                    return;
-                }
-            } catch (SQLException ex) {
-                if (!noSuchTable(ex)) throw ex;
+            Integer current = currentSchemaVersion();
+            if (current != null && current == 2) {
+                return;
+            }
+            if (current != null && current != 1) {
+                throw new SQLException("Unsupported schema version: " + current);
             }
             connection.setAutoCommit(false);
             try (Statement statement = connection.createStatement()) {
-                for (String sql : splitStatements(readMigration())) {
+                if (current == null) {
+                    for (String sql : splitStatements(readMigration("V1__initial.sql"))) {
+                        statement.execute(sql);
+                    }
+                }
+                for (String sql : splitStatements(readMigration("V2__embeddings_cache.sql"))) {
                     statement.execute(sql);
                 }
-                try (PreparedStatement ps = connection.prepareStatement("INSERT INTO schema_metadata (key, value) VALUES (?, ?)")) {
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "INSERT INTO schema_metadata (key, value) VALUES (?, ?) "
+                                + "ON CONFLICT(key) DO UPDATE SET value = excluded.value")) {
                     ps.setString(1, "schema_version");
-                    ps.setString(2, "1");
+                    ps.setString(2, "2");
                     ps.executeUpdate();
                 }
                 connection.commit();
@@ -130,6 +169,19 @@ public final class SqliteIndexRepository implements IndexRepository {
                     throw restoreEx;
                 }
             }
+        }
+    }
+
+    private Integer currentSchemaVersion() throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("SELECT value FROM schema_metadata WHERE key = 'schema_version'")) {
+            if (!rs.next()) {
+                return null;
+            }
+            return rs.getInt(1);
+        } catch (SQLException ex) {
+            if (!noSuchTable(ex)) throw ex;
+            return null;
         }
     }
 
@@ -257,26 +309,200 @@ public final class SqliteIndexRepository implements IndexRepository {
         }
     }
 
-    @Override
-    public List<RootIdentity> findCandidates(UUID worldId, int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) throws SQLException {
-        String sql = "SELECT c.world_uuid, c.x, c.y, c.z, c.block_type, c.fingerprint, c.revision " +
-                "FROM containers c JOIN chunks ch ON ch.world_uuid = c.world_uuid AND ch.chunk_x = c.chunk_x AND ch.chunk_z = c.chunk_z " +
+    /**
+     * Builds the candidate-containers query for available chunks, optionally
+     * filtering by a continuation cursor.
+     *
+     * @param withCursor whether to include the cursor filter
+     * @return the candidate page SQL statement
+     */
+    static String candidatePageSql(boolean withCursor) {
+        return "SELECT c.world_uuid, c.x, c.y, c.z, c.block_type, c.fingerprint, c.revision " +
+                "FROM chunks ch JOIN containers c INDEXED BY containers_by_chunk " +
+                "ON ch.world_uuid = c.world_uuid AND ch.chunk_x = c.chunk_x AND ch.chunk_z = c.chunk_z " +
                 "WHERE ch.available = 1 AND c.world_uuid = ? AND c.chunk_x BETWEEN ? AND ? AND c.chunk_z BETWEEN ? AND ? " +
-                "ORDER BY c.world_uuid, c.x, c.y, c.z";
+                (withCursor
+                        ? "AND (c.x > ? OR (c.x = ? AND c.y > ?) OR (c.x = ? AND c.y = ? AND c.z > ?)) "
+                        : "") +
+                "ORDER BY c.world_uuid, c.x, c.y, c.z LIMIT ?";
+    }
+
+    @Override
+    public CandidatePage findCandidates(
+            UUID worldId,
+            int minChunkX,
+            int maxChunkX,
+            int minChunkZ,
+            int maxChunkZ,
+            CandidateCursor after,
+            int limit
+    ) throws SQLException {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("Candidate page limit must be positive");
+        }
+        String sql = candidatePageSql(after != null);
+        int fetchLimit = limit == Integer.MAX_VALUE ? limit : limit + 1;
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setString(1, worldId.toString());
-            ps.setInt(2, minChunkX);
-            ps.setInt(3, maxChunkX);
-            ps.setInt(4, minChunkZ);
-            ps.setInt(5, maxChunkZ);
-            List<RootIdentity> candidates = new ArrayList<>();
+            int parameter = 1;
+            ps.setString(parameter++, worldId.toString());
+            ps.setInt(parameter++, minChunkX);
+            ps.setInt(parameter++, maxChunkX);
+            ps.setInt(parameter++, minChunkZ);
+            ps.setInt(parameter++, maxChunkZ);
+            if (after != null) {
+                ps.setInt(parameter++, after.x());
+                ps.setInt(parameter++, after.x());
+                ps.setInt(parameter++, after.y());
+                ps.setInt(parameter++, after.x());
+                ps.setInt(parameter++, after.y());
+                ps.setInt(parameter++, after.z());
+            }
+            ps.setInt(parameter, fetchLimit);
+
+            List<RootIdentity> candidates = new ArrayList<>(Math.min(limit, 256));
+            boolean hasMore = false;
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    BlockKey blockKey = new BlockKey(UUID.fromString(rs.getString(1)), rs.getInt(2), rs.getInt(3), rs.getInt(4));
-                    candidates.add(new RootIdentity(blockKey, rs.getString(5), rs.getBytes(6), rs.getLong(7)));
+                    if (candidates.size() == limit) {
+                        hasMore = true;
+                        break;
+                    }
+                    BlockKey blockKey = new BlockKey(
+                            UUID.fromString(rs.getString(1)),
+                            rs.getInt(2),
+                            rs.getInt(3),
+                            rs.getInt(4)
+                    );
+                    candidates.add(new RootIdentity(
+                            blockKey,
+                            rs.getString(5),
+                            rs.getBytes(6),
+                            rs.getLong(7)
+                    ));
                 }
             }
-            return candidates;
+            CandidateCursor next = hasMore && !candidates.isEmpty()
+                    ? cursor(candidates.getLast())
+                    : null;
+            return new CandidatePage(candidates, next);
+        }
+    }
+
+    private static CandidateCursor cursor(RootIdentity root) {
+        return new CandidateCursor(root.key().x(), root.key().y(), root.key().z());
+    }
+
+    @Override
+    public Optional<RootIdentity> findRoot(BlockKey key) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT world_uuid, x, y, z, block_type, fingerprint, revision " +
+                        "FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
+            ps.setString(1, key.worldId().toString());
+            ps.setInt(2, key.x());
+            ps.setInt(3, key.y());
+            ps.setInt(4, key.z());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                BlockKey storedKey = new BlockKey(
+                        UUID.fromString(rs.getString(1)),
+                        rs.getInt(2),
+                        rs.getInt(3),
+                        rs.getInt(4)
+                );
+                return Optional.of(new RootIdentity(
+                        storedKey,
+                        rs.getString(5),
+                        rs.getBytes(6),
+                        rs.getLong(7)
+                ));
+            }
+        }
+    }
+
+    @Override
+    public Map<SemanticDescriptorHash, Embedding> findEmbeddings(
+            EmbeddingProvider provider,
+            Set<SemanticDescriptorHash> hashes
+    ) throws SQLException {
+        Objects.requireNonNull(provider, "Embedding provider");
+        if (hashes == null || hashes.isEmpty()) {
+            return Map.of();
+        }
+        List<SemanticDescriptorHash> sorted = new ArrayList<>(hashes);
+        Map<SemanticDescriptorHash, Embedding> found = new LinkedHashMap<>();
+        for (int start = 0; start < sorted.size(); start += LOAD_DOCUMENTS_BATCH) {
+            int end = Math.min(start + LOAD_DOCUMENTS_BATCH, sorted.size());
+            StringBuilder sql = new StringBuilder(
+                    "SELECT descriptor_hash, vector, vector_norm FROM embeddings "
+                            + "WHERE provider_id = ? AND provider_version = ? AND descriptor_hash IN (");
+            for (int i = start; i < end; i++) {
+                if (i > start) sql.append(',');
+                sql.append('?');
+            }
+            sql.append(')');
+            try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
+                ps.setString(1, provider.id());
+                ps.setInt(2, provider.version());
+                int parameter = 3;
+                for (int i = start; i < end; i++) {
+                    ps.setBytes(parameter++, sorted.get(i).bytes());
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        SemanticDescriptorHash hash = SemanticDescriptorHash.ofBytes(rs.getBytes(1));
+                        found.put(hash, requireProviderIdentity(
+                                provider, provider.decode(rs.getBytes(2), rs.getDouble(3))));
+                    }
+                }
+            }
+        }
+        return Map.copyOf(found);
+    }
+
+    @Override
+    public void putEmbeddings(
+            EmbeddingProvider provider,
+            Map<SemanticDescriptorHash, Embedding> embeddings
+    ) throws SQLException {
+        Objects.requireNonNull(provider, "Embedding provider");
+        if (embeddings == null || embeddings.isEmpty()) {
+            return;
+        }
+        connection.setAutoCommit(false);
+        Throwable primary = null;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "INSERT OR REPLACE INTO embeddings "
+                        + "(provider_id, provider_version, descriptor_hash, vector, vector_norm) "
+                        + "VALUES (?, ?, ?, ?, ?)")) {
+            for (Map.Entry<SemanticDescriptorHash, Embedding> entry : embeddings.entrySet()) {
+                Embedding embedding = requireProviderIdentity(provider, entry.getValue());
+                ps.setString(1, provider.id());
+                ps.setInt(2, provider.version());
+                ps.setBytes(3, entry.getKey().bytes());
+                ps.setBytes(4, embedding.encode());
+                ps.setDouble(5, embedding.norm());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            connection.commit();
+        } catch (RuntimeException | SQLException ex) {
+            primary = ex;
+            try { connection.rollback(); } catch (SQLException r) { ex.addSuppressed(r); }
+            throw ex;
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException restoreEx) {
+                if (primary instanceof SQLException sqlEx) {
+                    sqlEx.addSuppressed(restoreEx);
+                } else if (primary instanceof RuntimeException runtimeEx) {
+                    runtimeEx.addSuppressed(restoreEx);
+                } else if (primary == null) {
+                    throw restoreEx;
+                }
+            }
         }
     }
 
@@ -417,6 +643,13 @@ public final class SqliteIndexRepository implements IndexRepository {
         return embedding;
     }
 
+    /**
+     * Re-embeds all persisted documents if any row's provider identity differs
+     * from the supplied provider.
+     *
+     * @param provider embedding provider whose identity is compared
+     * @throws SQLException if the check or re-embedding fails
+     */
     void reembedIfMismatched(EmbeddingProvider provider) throws SQLException {
         boolean mismatch = false;
         try (PreparedStatement ps = connection.prepareStatement(
@@ -437,10 +670,10 @@ public final class SqliteIndexRepository implements IndexRepository {
         connection.close();
     }
 
-    private static String readMigration() {
-        try (InputStream input = SqliteIndexRepository.class.getClassLoader().getResourceAsStream("db/migration/V1__initial.sql")) {
+    private static String readMigration(String name) {
+        try (InputStream input = SqliteIndexRepository.class.getClassLoader().getResourceAsStream("db/migration/" + name)) {
             if (input == null) {
-                throw new IllegalStateException("Missing migration V1__initial.sql");
+                throw new IllegalStateException("Missing migration " + name);
             }
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException ex) {

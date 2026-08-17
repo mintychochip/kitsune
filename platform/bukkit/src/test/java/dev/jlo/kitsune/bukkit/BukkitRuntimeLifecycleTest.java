@@ -2,6 +2,7 @@ package dev.jlo.kitsune.bukkit;
 
 import org.junit.jupiter.api.Test;
 
+import dev.jlo.kitsune.api.embedding.Embedding;
 import dev.jlo.kitsune.api.embedding.EmbeddingProvider;
 import dev.jlo.kitsune.model.BlockKey;
 import dev.jlo.kitsune.model.ChunkKey;
@@ -9,6 +10,7 @@ import dev.jlo.kitsune.model.ContainerSnapshot;
 import dev.jlo.kitsune.model.IndexedItem;
 import dev.jlo.kitsune.model.RootIdentity;
 import dev.jlo.kitsune.index.IndexRepository;
+import dev.jlo.kitsune.index.SemanticDescriptorHash;
 
 import java.sql.SQLException;
 import java.util.List;
@@ -102,15 +104,36 @@ class BukkitRuntimeLifecycleTest {
             ) {}
 
             @Override
-            public List<RootIdentity> findCandidates(
+            public IndexRepository.CandidatePage findCandidates(
                     UUID worldId,
                     int minChunkX,
                     int maxChunkX,
                     int minChunkZ,
-                    int maxChunkZ
+                    int maxChunkZ,
+                    IndexRepository.CandidateCursor after,
+                    int limit
             ) {
-                return List.of();
+                return new IndexRepository.CandidatePage(List.of(), null);
             }
+
+            @Override
+            public java.util.Optional<RootIdentity> findRoot(BlockKey key) {
+                return java.util.Optional.empty();
+            }
+
+            @Override
+            public Map<SemanticDescriptorHash, Embedding> findEmbeddings(
+                    EmbeddingProvider provider,
+                    Set<SemanticDescriptorHash> hashes
+            ) {
+                return Map.of();
+            }
+
+            @Override
+            public void putEmbeddings(
+                    EmbeddingProvider provider,
+                    Map<SemanticDescriptorHash, Embedding> embeddings
+            ) {}
 
             @Override
             public Map<BlockKey, List<IndexedItem>> loadDocuments(
