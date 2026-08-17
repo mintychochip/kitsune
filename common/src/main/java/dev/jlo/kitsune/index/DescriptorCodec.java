@@ -24,13 +24,21 @@ final class DescriptorCodec {
     private DescriptorCodec() {}
 
     static byte[] encode(ItemDescriptor descriptor) {
+        return encode(descriptor, descriptor.amount());
+    }
+
+    static byte[] encodeSemantic(ItemDescriptor descriptor) {
+        return encode(descriptor, 1);
+    }
+
+    private static byte[] encode(ItemDescriptor descriptor, int amount) {
         try {
             var bytes = new BoundedByteArrayOutputStream(
                     MAX_PAYLOAD_BYTES, "Descriptor payload too large");
             try (var output = new DataOutputStream(bytes)) {
                 output.writeByte(VERSION);
                 writeString(output, descriptor.materialKey());
-                output.writeInt(descriptor.amount());
+                output.writeInt(amount);
                 writeStrings(output, descriptor.displayText());
                 writeStrings(output, descriptor.lore());
                 writeStringIntMap(output, descriptor.enchantments());
