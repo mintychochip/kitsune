@@ -21,11 +21,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
+/** Coordinates embedding, index lookup, access validation, and result ranking. */
 public final class SearchService {
+    private static final int CANDIDATE_PAGE_SIZE = 128;
     private static final Comparator<RootMatch> ROOT_COMPARATOR = Comparator
         .comparingDouble(RootMatch::bestScore)
         .reversed()
@@ -50,6 +53,7 @@ public final class SearchService {
     private final LiveRootAccess liveRootAccess;
     private final SearchPolicy policy;
 
+    /** Creates a search service from its readiness, storage, server, and policy dependencies. */
     public SearchService(
         IndexReadiness readiness,
         IndexWorker worker,
@@ -68,6 +72,7 @@ public final class SearchService {
         this.policy = Objects.requireNonNull(policy, "Policy must not be null");
     }
 
+    /** Executes a search asynchronously and returns its terminal outcome. */
     public CompletableFuture<SearchOutcome> search(
         SearchContext context,
         SearchRequest request,
@@ -95,27 +100,15 @@ public final class SearchService {
                         return CompletableFuture.completedFuture(SearchOutcome.noMatches());
                     }
                     return awaitReady(context, token, guard, chunks)
-                        .thenCompose(ignored -> findCandidates(context, token, guard))
-                        .thenCompose(candidates -> {
-                            requireCurrent(context, token, guard);
-                            if (candidates.isEmpty()) {
-                                return CompletableFuture.completedFuture(SearchOutcome.noMatches());
-                            }
-                            return validateCandidates(context, token, guard, candidates)
-                                .thenCompose(allowedRoots -> {
-                                    requireCurrent(context, token, guard);
-                                    if (allowedRoots.isEmpty()) {
-                                        return CompletableFuture.completedFuture(SearchOutcome.noMatches());
-                                    }
-                                    return loadAndRank(
-                                        context,
-                                        token,
-                                        guard,
-                                        queryEmbedding,
-                                        allowedRoots
-                                    );
-                                });
-                        });
+                        .thenCompose(ignored -> collectCandidatePages(
+                            context,
+                            token,
+                            guard,
+                            queryEmbedding,
+                            candidateBounds(context),
+                            null,
+                            new RankAccumulator()
+                        ));
                 }));
 
         return pipeline.handle((outcome, failure) -> mapOutcome(context, token, guard, outcome, failure));
@@ -198,33 +191,125 @@ public final class SearchService {
         return stage.toCompletableFuture().thenRun(() -> requireCurrent(context, token, guard));
     }
 
-    private CompletableFuture<List<RootIdentity>> findCandidates(
+    private CompletableFuture<IndexRepository.CandidatePage> findCandidates(
         SearchContext context,
         SearchToken token,
-        SearchGuard guard
+        SearchGuard guard,
+        CandidateBounds bounds,
+        IndexRepository.CandidateCursor after
     ) {
-        BlockKey origin = context.origin();
-        int radius = policy.radius();
-        int minChunkX = chunkCoordinate((long) origin.x() - radius);
-        int maxChunkX = chunkCoordinate((long) origin.x() + radius);
-        int minChunkZ = chunkCoordinate((long) origin.z() - radius);
-        int maxChunkZ = chunkCoordinate((long) origin.z() + radius);
-
         return worker.submit(() -> {
             requireCurrent(context, token, guard);
-            List<RootIdentity> candidates = repository.findCandidates(
-                origin.worldId(),
-                minChunkX,
-                maxChunkX,
-                minChunkZ,
-                maxChunkZ
+            IndexRepository.CandidatePage candidates = repository.findCandidates(
+                bounds.worldId(),
+                bounds.minChunkX(),
+                bounds.maxChunkX(),
+                bounds.minChunkZ(),
+                bounds.maxChunkZ(),
+                after,
+                CANDIDATE_PAGE_SIZE
             );
             requireCurrent(context, token, guard);
-            return List.copyOf(Objects.requireNonNull(candidates, "Candidates must not be null"));
+            return Objects.requireNonNull(candidates, "Candidate page must not be null");
         }).thenApply(candidates -> {
             requireCurrent(context, token, guard);
             return candidates;
         });
+    }
+
+    private CompletableFuture<SearchOutcome> collectCandidatePages(
+        SearchContext context,
+        SearchToken token,
+        SearchGuard guard,
+        Embedding queryEmbedding,
+        CandidateBounds bounds,
+        IndexRepository.CandidateCursor after,
+        RankAccumulator accumulator
+    ) {
+        return findCandidates(context, token, guard, bounds, after)
+            .thenCompose(page -> {
+                requireCurrent(context, token, guard);
+                if (page.roots().isEmpty()) {
+                    return continueCandidatePages(
+                        context,
+                        token,
+                        guard,
+                        queryEmbedding,
+                        bounds,
+                        page.next(),
+                        accumulator
+                    );
+                }
+                return validateCandidates(context, token, guard, page.roots())
+                    .thenCompose(allowedRoots -> {
+                        requireCurrent(context, token, guard);
+                        if (allowedRoots.isEmpty()) {
+                            return continueCandidatePages(
+                                context,
+                                token,
+                                guard,
+                                queryEmbedding,
+                                bounds,
+                                page.next(),
+                                accumulator
+                            );
+                        }
+                        return loadAndRank(
+                            context,
+                            token,
+                            guard,
+                            queryEmbedding,
+                            allowedRoots
+                        ).thenCompose(rankedPage -> {
+                            requireCurrent(context, token, guard);
+                            accumulator.add(rankedPage);
+                            return continueCandidatePages(
+                                context,
+                                token,
+                                guard,
+                                queryEmbedding,
+                                bounds,
+                                page.next(),
+                                accumulator
+                            );
+                        });
+                    });
+            });
+    }
+
+    private CompletableFuture<SearchOutcome> continueCandidatePages(
+        SearchContext context,
+        SearchToken token,
+        SearchGuard guard,
+        Embedding queryEmbedding,
+        CandidateBounds bounds,
+        IndexRepository.CandidateCursor next,
+        RankAccumulator accumulator
+    ) {
+        if (next == null) {
+            return CompletableFuture.completedFuture(accumulator.finish());
+        }
+        return collectCandidatePages(
+            context,
+            token,
+            guard,
+            queryEmbedding,
+            bounds,
+            next,
+            accumulator
+        );
+    }
+
+    private CandidateBounds candidateBounds(SearchContext context) {
+        BlockKey origin = context.origin();
+        int radius = policy.radius();
+        return new CandidateBounds(
+            origin.worldId(),
+            chunkCoordinate((long) origin.x() - radius),
+            chunkCoordinate((long) origin.x() + radius),
+            chunkCoordinate((long) origin.z() - radius),
+            chunkCoordinate((long) origin.z() + radius)
+        );
     }
 
     private CompletableFuture<Map<BlockKey, AllowedRoot>> validateCandidates(
@@ -265,7 +350,7 @@ public final class SearchService {
         });
     }
 
-    private CompletableFuture<SearchOutcome> loadAndRank(
+    private CompletableFuture<RankedPage> loadAndRank(
         SearchContext context,
         SearchToken token,
         SearchGuard guard,
@@ -280,20 +365,20 @@ public final class SearchService {
                 embeddings
             );
             requireCurrent(context, token, guard);
-            SearchOutcome outcome = rankDocuments(
+            RankedPage page = rankPage(
                 Objects.requireNonNull(documents, "Documents must not be null"),
                 queryEmbedding,
                 allowedRoots
             );
             requireCurrent(context, token, guard);
-            return outcome;
-        }).thenApply(outcome -> {
+            return page;
+        }).thenApply(page -> {
             requireCurrent(context, token, guard);
-            return outcome;
+            return page;
         });
     }
 
-    private SearchOutcome rankDocuments(
+    private RankedPage rankPage(
         Map<BlockKey, List<IndexedItem>> documents,
         Embedding queryEmbedding,
         Map<BlockKey, AllowedRoot> allowedRoots
@@ -343,16 +428,12 @@ public final class SearchService {
             ));
         }
 
-        if (matchingRoots.isEmpty()) {
-            return SearchOutcome.noMatches();
-        }
-
         matchingRoots.sort(ROOT_COMPARATOR);
-        int totalMatchingRoots = matchingRoots.size();
-        List<RootMatch> visibleRoots = matchingRoots.size() <= policy.maxResults()
-            ? List.copyOf(matchingRoots)
-            : List.copyOf(matchingRoots.subList(0, policy.maxResults()));
-        return SearchOutcome.success(visibleRoots, totalMatchingRoots, totalMatchingStacks);
+        return new RankedPage(
+            List.copyOf(matchingRoots),
+            matchingRoots.size(),
+            totalMatchingStacks
+        );
     }
 
     private SearchOutcome mapOutcome(
@@ -437,6 +518,47 @@ public final class SearchService {
             cause = cause.getCause();
         }
         return cause;
+    }
+
+    private record CandidateBounds(
+        UUID worldId,
+        int minChunkX,
+        int maxChunkX,
+        int minChunkZ,
+        int maxChunkZ
+    ) {}
+
+    private record RankedPage(
+        List<RootMatch> roots,
+        int totalMatchingRoots,
+        int totalMatchingStacks
+    ) {}
+
+    private final class RankAccumulator {
+        private final List<RootMatch> visibleRoots = new ArrayList<>();
+        private int totalMatchingRoots;
+        private int totalMatchingStacks;
+
+        void add(RankedPage page) {
+            totalMatchingRoots = Math.addExact(totalMatchingRoots, page.totalMatchingRoots());
+            totalMatchingStacks = Math.addExact(totalMatchingStacks, page.totalMatchingStacks());
+            visibleRoots.addAll(page.roots());
+            visibleRoots.sort(ROOT_COMPARATOR);
+            if (visibleRoots.size() > policy.maxResults()) {
+                visibleRoots.subList(policy.maxResults(), visibleRoots.size()).clear();
+            }
+        }
+
+        SearchOutcome finish() {
+            if (totalMatchingRoots == 0) {
+                return SearchOutcome.noMatches();
+            }
+            return SearchOutcome.success(
+                List.copyOf(visibleRoots),
+                totalMatchingRoots,
+                totalMatchingStacks
+            );
+        }
     }
 
     private static final class CanceledSearchException extends RuntimeException {

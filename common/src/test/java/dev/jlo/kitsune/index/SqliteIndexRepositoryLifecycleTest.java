@@ -32,13 +32,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Verifies repository reopen and embedding-provider lifecycle behavior. */
 class SqliteIndexRepositoryLifecycleTest {
 
+    /** Provides a temporary SQLite repository and direct inspection helpers. */
     static final class RepositoryTestFixture implements AutoCloseable {
         private final Path database;
         private final IndexRepository repository;
         private Connection connection;
 
+        /** Opens and migrates the repository at the supplied database path. */
         RepositoryTestFixture(Path database) throws Exception {
             this.database = database;
             this.connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
@@ -138,6 +141,7 @@ class SqliteIndexRepositoryLifecycleTest {
         }
     }
 
+    /** Re-embeds persisted documents only when the provider metadata changes. */
     @Test
     void openWithProviderReembedsOnlyWhenNeeded(@TempDir Path tempDir) throws Exception {
         Path database = tempDir.resolve("lifecycle.db");
@@ -145,19 +149,23 @@ class SqliteIndexRepositoryLifecycleTest {
         try (RepositoryTestFixture first = new RepositoryTestFixture(database)) {
             root = first.key(0, 64, 0);
             first.insertAvailable(root, "diamond");
-            assertFalse(first.repository().findCandidates(root.worldId(), 0, 0, 0, 0).isEmpty());
+            assertFalse(first.repository().findCandidates(
+                    root.worldId(), 0, 0, 0, 0, null, 10).roots().isEmpty());
         }
         try (RepositoryTestFixture ignored = new RepositoryTestFixture(database)) {
             // existing path resets chunks
         }
         EmbeddingProvider fakeV2 = fakeProvider("builtin:fake", 2);
         try (var repo = SqliteIndexRepository.open(database, fakeV2)) {
-            assertTrue(repo.findCandidates(root.worldId(), 0, 0, 0, 0).isEmpty(), "chunks must remain unavailable after reopen");
+            assertTrue(repo.findCandidates(
+                    root.worldId(), 0, 0, 0, 0, null, 10).roots().isEmpty(),
+                    "chunks must remain unavailable after reopen");
             Map<BlockKey, List<IndexedItem>> docs = repo.loadDocuments(Set.of(root), fakeV2);
             assertEquals(2, docs.get(root).getFirst().embedding().providerVersion());
         }
     }
 
+    /** Creates an embedding provider with deterministic identity and payload behavior. */
     private static EmbeddingProvider fakeProvider(String id, int version) {
         return new EmbeddingProvider() {
             @Override public String id() { return id; }
