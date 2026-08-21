@@ -1,18 +1,12 @@
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
-import org.gradle.kotlin.dsl.configure
-import java.util.zip.ZipFile
-
 
 allprojects {
     repositories {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
         maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
-        maven("https://maven.fabricmc.net/")
-        maven("https://maven.minecraftforge.net/")
-        maven("https://maven.neoforged.net/releases/")
     }
 }
 
@@ -33,13 +27,10 @@ subprojects {
         }
     }
 }
+
 val publishedArtifacts = mapOf(
     ":api" to "kitsune-api",
-    ":paper" to "kitsune-paper",
-    ":spigot" to "kitsune-spigot",
-    ":fabric" to "kitsune-fabric",
-    ":forge" to "kitsune-forge",
-    ":neoforge" to "kitsune-neoforge"
+    ":paper" to "kitsune-paper"
 )
 
 subprojects {
@@ -56,10 +47,7 @@ subprojects {
                         if (project.path == ":api") {
                             from(components["java"])
                         } else {
-                            val mainArtifact = when (project.path) {
-                                ":fabric" -> tasks.getByName("remapJar")
-                                else -> tasks.findByName("shadowJar") ?: tasks.getByName("jar")
-                            }
+                            val mainArtifact = tasks.findByName("shadowJar") ?: tasks.getByName("jar")
                             artifact(mainArtifact)
                             artifact(tasks.getByName("sourcesJar"))
                             artifact(tasks.getByName("javadocJar"))
@@ -67,9 +55,6 @@ subprojects {
                                 task.name.startsWith("publishMavenJavaPublicationTo")
                             }.configureEach {
                                 dependsOn(mainArtifact)
-                                if (project.path == ":paper" || project.path == ":spigot") {
-                                    dependsOn(tasks.getByName("jar"))
-                                }
                             }
                         }
                         pom {
@@ -110,35 +95,3 @@ subprojects {
 
 group = providers.gradleProperty("group").get()
 version = providers.gradleProperty("version").get()
-
-val bundledRuntimeTasks = mapOf(
-    ":fabric" to "remapJar",
-    ":forge" to "jar",
-    ":neoforge" to "jar"
-)
-val requiredBundledRuntimeEntries = listOf(
-    "org/sqlite/JDBC.class",
-    "com/fasterxml/jackson/databind/ObjectMapper.class"
-)
-
-val verifyBundledRuntimeDependencies = tasks.register("verifyBundledRuntimeDependencies") {
-    dependsOn(bundledRuntimeTasks.map { (modulePath, taskName) -> "$modulePath:$taskName" })
-    doLast {
-        bundledRuntimeTasks.forEach { (modulePath, taskName) ->
-            val artifact = project(modulePath).tasks.named(taskName).get().outputs.files.singleFile
-            ZipFile(artifact).use { archive ->
-                requiredBundledRuntimeEntries.forEach { entry ->
-                    check(archive.getEntry(entry) != null) {
-                        "$modulePath artifact ${artifact.name} is missing $entry"
-                    }
-                }
-            }
-        }
-    }
-}
-
-subprojects {
-    tasks.matching { it.name == "check" }.configureEach {
-        dependsOn(rootProject.tasks.named("verifyBundledRuntimeDependencies"))
-    }
-}

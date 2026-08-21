@@ -2,7 +2,6 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
         maven("https://repo.papermc.io/repository/maven-public/")
-        maven("https://maven.fabricmc.net/")
     }
 }
 
@@ -14,11 +13,7 @@ include(
     ":api",
     ":common",
     ":platform:bukkit",
-    ":paper",
-    ":spigot",
-    ":fabric",
-    ":forge",
-    ":neoforge"
+    ":paper"
 )
 
 rootProject.name = "kitsune"

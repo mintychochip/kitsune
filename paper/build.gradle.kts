@@ -34,6 +34,7 @@ tasks.build {
 
 tasks.runServer {
     minecraftVersion(rootProject.providers.gradleProperty("minecraftVersion").get())
+    pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     })
