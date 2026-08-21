@@ -3,6 +3,8 @@ package dev.jlo.kitsune.command;
 import dev.jlo.kitsune.model.BlockKey;
 import dev.jlo.kitsune.search.AllowedRoot;
 import dev.jlo.kitsune.search.LiveRootAccess;
+import dev.jlo.kitsune.search.ItemMatch;
+
 import dev.jlo.kitsune.search.RootMatch;
 import dev.jlo.kitsune.search.SearchContext;
 import dev.jlo.kitsune.search.SearchOutcome;
@@ -21,6 +23,8 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+
+import java.util.Comparator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -277,7 +281,8 @@ public final class KitsuneCommand implements CommandExecutor {
             String text = request.verbose()
                 ? chatRenderer.verboseMarker(request.query(), root)
                 : chatRenderer.normalMarker(request.query(), root);
-            markerRenderer.spawn(player, root.key(), text).ifPresent(markers::add);
+            ItemMatch featuredItem = bestItemMatch(root);
+            markerRenderer.spawn(player, root.key(), text, featuredItem).ifPresent(markers::add);
         }
         if (sessions.attach(token, markers)) {
             player.sendMessage(chat);
@@ -329,6 +334,13 @@ public final class KitsuneCommand implements CommandExecutor {
             visibleStacks
         );
     }
+
+    private static ItemMatch bestItemMatch(RootMatch root) {
+        return root.itemMatches().stream()
+            .max(Comparator.comparingDouble(ItemMatch::score))
+            .orElseThrow(() -> new IllegalStateException("Root match must expose item matches"));
+    }
+
 
     private boolean isCurrentPlayerInOriginWorld(Player player, SearchContext context, SearchToken token) {
         if (!sessions.isCurrent(token)) {
