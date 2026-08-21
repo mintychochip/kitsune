@@ -155,6 +155,33 @@ final class OpenAiCompatibleEmbeddingProviderTest {
         }
     }
 
+    @Test
+    void openRouterCompatibilitySettingsWork() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        AtomicReference<String> authorization = new AtomicReference<>();
+        try (ServerFixture server = ServerFixture.responding((exchange, attempt) -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            requestBody.set(readBody(exchange));
+            respond(exchange, 200, "{\"data\":[{\"index\":0,\"embedding\":[1.0,0.0]}]}");
+        })) {
+            java.util.LinkedHashMap<String, String> settings = new java.util.LinkedHashMap<>();
+            settings.put("endpoint", server.endpoint());
+            settings.put("model", "openai/text-embedding-3-small");
+            settings.put("credential-reference", "env:OPENROUTER_API_KEY");
+            settings.put("allow-insecure-http", "true");
+            EmbeddingProvider provider = new OpenAiCompatibleEmbeddingProviderFactory().create(
+                settings,
+                reference -> Optional.of("sk-test")
+            );
+            Embedding embedding = provider.embedQuery("test");
+
+            assertTrue(provider.id().startsWith("remote:openai-compatible:"));
+            assertTrue(requestBody.get().contains("\"model\":\"openai/text-embedding-3-small\""));
+            assertEquals("Bearer sk-test", authorization.get());
+            assertEquals(provider.id(), embedding.providerId());
+        }
+    }
+
     private static OpenAiCompatibleEmbeddingProvider provider(
         String endpoint,
         Map<String, String> overrides

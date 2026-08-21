@@ -70,6 +70,26 @@ The provider supports batch item embedding. A single query is sent as a one-item
 
 Item descriptors are converted to deterministic text using fixed field labels and their already-canonical sorted collections. Query text is passed through the configured query prefix. Document text is passed through the configured document prefix. Prefixes are part of provider identity because changing them changes the vector space.
 
+## OpenRouter compatibility
+
+OpenRouter exposes an OpenAI-compatible embeddings endpoint at `https://openrouter.ai/api/v1/embeddings`. Kitsune can use it through the generic `remote:openai-compatible` factory with an OpenRouter API key credential. Example settings map:
+
+```java
+Map.of(
+  "endpoint", "https://openrouter.ai/api/v1/embeddings",
+  "model", "openai/text-embedding-3-small",
+  "credential-reference", "env:KITSUNE_OPENROUTER_API_KEY",
+  "document-prefix", "",
+  "query-prefix", "",
+  "request-timeout-millis", "15000",
+  "max-batch-size", "32",
+  "max-response-bytes", "4194304",
+  "max-request-bytes", "1048576",
+  "max-retries", "2",
+  "dimensions", "0"
+)
+```
+
 ## Dense vector contract
 
 `DenseEmbedding` stores bounded finite float components, computes a double-precision norm and raw cosine, and encodes a versioned binary payload. It validates provider ID and version compatibility before comparison.

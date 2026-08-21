@@ -230,6 +230,11 @@ git commit -m "feat: add remote embedding settings and credentials"
 - Provider exposes a package-visible batch method used by tests and `embed(ItemDescriptor)` delegates through a one-item batch.
 - Provider ID contains a deterministic non-secret hash of endpoint/model/prefix/dimension/protocol settings; provider version is the adapter protocol version.
 
+**OpenRouter compatibility:**
+- The generic `remote:openai-compatible` factory is sufficient for OpenRouter.
+- Use endpoint `https://openrouter.ai/api/v1/embeddings`, an OpenRouter model such as `openai/text-embedding-3-small`, and `env:KITSUNE_OPENROUTER_API_KEY` for the credential reference.
+- Example settings map is documented in the provider framework design doc.
+
 - [ ] **Step 1: Add failing mock-server integration tests**
 
 Use `com.sun.net.httpserver.HttpServer` on an ephemeral port. Test:
