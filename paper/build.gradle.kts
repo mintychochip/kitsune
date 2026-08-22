@@ -36,7 +36,7 @@ tasks.runServer {
     minecraftVersion(rootProject.providers.gradleProperty("minecraftVersion").get())
     pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
     javaLauncher.set(javaToolchains.launcherFor {
-        languageVersion.set(JavaLanguageVersion.of(21))
+        languageVersion.set(JavaLanguageVersion.of(25))
     })
     jvmArgs("-Dcom.mojang.eula.agree=true")
 }

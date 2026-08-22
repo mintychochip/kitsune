@@ -1,10 +1,11 @@
 [versions]
 junit = "5.14.4"
 sqlite = "3.53.2.1"
-paper-api = "1.21.4-R0.1-SNAPSHOT"
-spigot-api = "1.21.4-R0.1-SNAPSHOT"
+paper-api = "26.2.build.92-stable"
+spigot-api = "26.2-R0.1-SNAPSHOT"
 jackson = "2.18.3"
-
+forge = "26.2-65.1.0"
+neoforge = "26.2.0.45-beta"
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
@@ -13,3 +14,5 @@ sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper-api" }
 spigot-api = { module = "org.spigotmc:spigot-api", version.ref = "spigot-api" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+forge = { module = "net.minecraftforge:forge", version.ref = "forge" }
+neoforge = { module = "net.neoforged:neoforge", version.ref = "neoforge" }

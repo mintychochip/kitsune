@@ -1,7 +1,7 @@
 name: Kitsune
 version: '${version}'
 main: dev.jlo.kitsune.paper.PaperPlugin
-api-version: '1.21.4'
+api-version: '26.2'
 description: Semantic nearby storage search
 softdepend: [LWC]
 commands:
