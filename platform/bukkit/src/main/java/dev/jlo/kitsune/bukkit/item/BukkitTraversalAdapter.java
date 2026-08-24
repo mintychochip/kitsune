@@ -17,6 +17,13 @@ import dev.jlo.kitsune.model.ItemDescriptor;
  * describing, fingerprinting, and expanding nested item contents.
  */
 public final class BukkitTraversalAdapter implements TraversalAdapter<ItemStack> {
+    private static final ItemFeatureRegistry TAXONOMY = new ItemFeatureRegistry(
+        List.of(new MaterialTaxonomyFeatureProvider()),
+        failure -> {
+            throw new IllegalStateException("Taxonomy feature contribution failed", failure);
+        }
+    );
+
     private final Server server;
 
     /**
@@ -38,7 +45,24 @@ public final class BukkitTraversalAdapter implements TraversalAdapter<ItemStack>
     @Override
     public ItemDescriptor describe(ItemStack node) {
         if (BukkitItemDescriber.isEmpty(node)) throw new IllegalArgumentException("Item stack must not be empty");
-        return BukkitItemDescriber.describe(node, server);
+        ItemDescriptor base = BukkitItemDescriber.describe(node, server);
+        ItemDescriptor.Builder enriched = copyBase(base);
+        TAXONOMY.contribute(base, enriched);
+        return enriched.buildBounded(256, 256);
+    }
+
+    private static ItemDescriptor.Builder copyBase(ItemDescriptor base) {
+        ItemDescriptor.Builder builder = ItemDescriptor.builder()
+            .materialKey(base.materialKey())
+            .amount(base.amount());
+        base.displayText().forEach(builder::addDisplayText);
+        base.lore().forEach(builder::addLore);
+        base.enchantments().forEach(builder::addEnchantment);
+        base.attributes().forEach(builder::addAttribute);
+        base.traits().forEach(builder::addTrait);
+        base.scalarMetadata().forEach(builder::addScalarMetadata);
+        base.customTags().forEach(builder::addCustomTag);
+        return builder;
     }
 
     /**
