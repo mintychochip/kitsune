@@ -5,6 +5,10 @@ import dev.jlo.kitsune.api.protection.BlockAccessProvider;
 import dev.jlo.kitsune.bukkit.index.BukkitRootResolver;
 import dev.jlo.kitsune.item.BukkitTraversalAdapter;
 import dev.jlo.kitsune.protection.LwcProtectionProvider;
+import dev.jlo.kitsune.bukkit.protection.BoltProtectionProvider;
+import dev.jlo.kitsune.bukkit.protection.LocketteProtectionProvider;
+import dev.jlo.kitsune.embedding.local.LocalOnnxEmbeddingProvider;
+import dev.jlo.kitsune.embedding.local.OnnxModelCatalog;
 import dev.jlo.kitsune.config.ConfigLoader;
 import dev.jlo.kitsune.config.KitsuneConfig;
 import dev.jlo.kitsune.embedding.EmbeddingRegistry;
@@ -79,6 +83,7 @@ public final class BukkitRuntime implements AutoCloseable {
     private volatile SessionListener sessionListener;
     private volatile dev.jlo.kitsune.command.KitsuneCommand kitsuneCommand;
     private volatile BlockAccessProvider lwcProtectionProvider;
+    private final List<BlockAccessProvider> registeredProtectionProviders = new ArrayList<>();
 
     /**
      * Creates a runtime bound to a plugin and server, with optional Paper capabilities.
@@ -125,12 +130,22 @@ public final class BukkitRuntime implements AutoCloseable {
         final EmbeddingProvider embeddingProvider;
         try {
             loadedConfig = ConfigLoader.load(plugin);
+            List<EmbeddingProvider> providers =
+                new ArrayList<>(serviceProviders(EmbeddingProvider.class));
+            if (LocalOnnxEmbeddingProvider.PROVIDER_ID.equals(loadedConfig.embeddingProvider())) {
+                providers.add(LocalOnnxEmbeddingProvider.create(
+                    dataDirectory.resolve("models"),
+                    OnnxModelCatalog.resolve(OnnxModelCatalog.defaultModelKey()).orElseThrow(),
+                    true
+                ));
+            }
             EmbeddingRegistry registry = new EmbeddingRegistry(
-                serviceProviders(EmbeddingProvider.class),
+                providers,
                 loadedConfig.embeddingProvider()
             );
             embeddingProvider = registry.selectedProvider();
             registerLwcIntegrationIfEnabled();
+            registerOptionalProtectionIntegrations();
         } catch (Throwable failure) {
             failStart(failure);
             return;
@@ -194,6 +209,14 @@ public final class BukkitRuntime implements AutoCloseable {
                 failure = appendFailure(failure, unregisterFailure);
             }
         }
+        for (BlockAccessProvider provider : List.copyOf(registeredProtectionProviders)) {
+            try {
+                server.getServicesManager().unregister(BlockAccessProvider.class, provider);
+            } catch (Throwable unregisterFailure) {
+                failure = appendFailure(failure, unregisterFailure);
+            }
+        }
+        registeredProtectionProviders.clear();
 
         ContainerIndex index = containerIndex;
         if (index != null) index.stopAccepting();
@@ -472,6 +495,50 @@ public final class BukkitRuntime implements AutoCloseable {
             throw new IllegalStateException(LWC_INCOMPATIBILITY_MESSAGE, failure);
         }
     }
+    private void registerOptionalProtectionIntegrations() {
+        registerBoltIntegrationIfEnabled();
+        registerLocketteIntegrationIfEnabled();
+    }
+
+    private void registerBoltIntegrationIfEnabled() {
+        Plugin boltPlugin = server.getPluginManager().getPlugin("Bolt");
+        if (boltPlugin == null || !boltPlugin.isEnabled()) return;
+        try {
+            org.popcraft.bolt.BoltAPI boltApi =
+                server.getServicesManager().load(org.popcraft.bolt.BoltAPI.class);
+            if (boltApi == null) return;
+            BlockAccessProvider provider = new BoltProtectionProvider(boltApi);
+            server.getServicesManager().register(
+                BlockAccessProvider.class, provider, plugin, ServicePriority.Normal
+            );
+            registeredProtectionProviders.add(provider);
+        } catch (Throwable failure) {
+            plugin.getLogger().log(
+                Level.WARNING,
+                "Bolt protection integration failed; continuing without it",
+                failure
+            );
+        }
+    }
+
+    private void registerLocketteIntegrationIfEnabled() {
+        Plugin lockettePlugin = server.getPluginManager().getPlugin("Lockette");
+        if (lockettePlugin == null || !lockettePlugin.isEnabled()) return;
+        try {
+            BlockAccessProvider provider = new LocketteProtectionProvider();
+            server.getServicesManager().register(
+                BlockAccessProvider.class, provider, plugin, ServicePriority.Normal
+            );
+            registeredProtectionProviders.add(provider);
+        } catch (Throwable failure) {
+            plugin.getLogger().log(
+                Level.WARNING,
+                "Lockette protection integration failed; continuing without it",
+                failure
+            );
+        }
+    }
+
 
     private boolean setCommandUnavailable(String message) {
         PluginCommand command = plugin.getCommand("kitsune");
