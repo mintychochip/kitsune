@@ -80,12 +80,12 @@ embedding:
 ## Building from source
 
 ```bash
-./gradlew :paper:build
+./gradlew :kitsune-paper:build
 ```
 
-The plugin jar is written to `paper/build/libs/kitsune-paper-*.jar`.
+The plugin jar is written to `kitsune-paper/build/libs/kitsune-paper-*.jar`.
 
-The project uses a Gradle 9.5.1 wrapper and Java 25. Other modules (`api`, `common`, `platform:bukkit`) are shared between Paper and future platform entry points.
+The project uses a Gradle 9.5.1 wrapper and Java 25. Other modules (`kitsune-api`, `kitsune-common`, `platform:bukkit`) are shared between Paper and future platform entry points.
 
 ## License
 

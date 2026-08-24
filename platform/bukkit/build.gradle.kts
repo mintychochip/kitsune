@@ -8,8 +8,8 @@ java {
 }
 
 dependencies {
-    api(project(":api"))
-    implementation(project(":common"))
+    api(project(":kitsune-api"))
+    implementation(project(":kitsune-common"))
     compileOnly(libs.spigot.api)
     testCompileOnly(libs.spigot.api)
     testImplementation(platform("org.junit:junit-bom:${libs.versions.junit.get()}"))

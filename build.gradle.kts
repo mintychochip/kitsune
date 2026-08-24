@@ -29,8 +29,8 @@ subprojects {
 }
 
 val publishedArtifacts = mapOf(
-    ":api" to "kitsune-api",
-    ":paper" to "kitsune-paper"
+    ":kitsune-api" to "kitsune-api",
+    ":kitsune-paper" to "kitsune-paper"
 )
 
 subprojects {
@@ -44,7 +44,7 @@ subprojects {
                 publications {
                     create<MavenPublication>("mavenJava") {
                         artifactId = publishedArtifacts.getValue(project.path)
-                        if (project.path == ":api") {
+                        if (project.path == ":kitsune-api") {
                             from(components["java"])
                         } else {
                             val mainArtifact = tasks.findByName("shadowJar") ?: tasks.getByName("jar")

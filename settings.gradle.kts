@@ -10,10 +10,10 @@ plugins {
 }
 
 include(
-    ":api",
-    ":common",
+    ":kitsune-api",
+    ":kitsune-common",
     ":platform:bukkit",
-    ":paper"
+    ":kitsune-paper"
 )
 
 rootProject.name = "kitsune"

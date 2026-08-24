@@ -10,8 +10,8 @@ java {
 }
 
 dependencies {
-    implementation(project(":common"))
-    implementation(project(":api"))
+    implementation(project(":kitsune-common"))
+    implementation(project(":kitsune-api"))
     implementation(project(":platform:bukkit"))
     compileOnly(libs.paper.api)
     testCompileOnly(libs.paper.api)
