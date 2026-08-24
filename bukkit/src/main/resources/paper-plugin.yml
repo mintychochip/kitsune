@@ -1,0 +1,23 @@
+name: KitsuneSX
+version: 1.0-SNAPSHOT
+main: org.aincraft.kitsune.BukkitKitsuneMain
+loader: org.aincraft.kitsune.KitsuneLoader
+api-version: "1.21"
+description: "Semantic search for containers"
+author: YourName
+website: "https://github.com/yourusername/kitsune"
+
+dependencies:
+  server:
+    paper-library-loader:
+      load: BEFORE
+      required: false
+      join-classpath: true
+
+permissions:
+  kitsune.use:
+    description: "Allows user to search for items in chests"
+    default: true
+  kitsune.admin:
+    description: "Allows user to use admin commands (reload, stats, reindex)"
+    default: op

@@ -1,0 +1,107 @@
+# Kitsune Configuration
+
+# Embedding Service Configuration
+embedding:
+  # Model to use for embeddings. The provider is automatically detected:
+  # - Local (no API key needed): nomic-embed-text-v1.5, all-MiniLM-L6-v2, bge-m3
+  # - OpenAI (requires api-key): text-embedding-3-small, text-embedding-3-large
+  # - Google (requires api-key): text-embedding-004
+  model: nomic-embed-text-v1.5
+
+  # API key - only required for cloud models (OpenAI, Google)
+  # Leave empty for local models
+  api-key: ""
+
+  # Auto-download model files for local models
+  auto-download: true
+
+# Storage Configuration
+storage:
+  # Provider: "local" (SQLite + JVector hybrid) - legacy configuration
+  # When using "local", the system defaults to SQLite for metadata and JVector for vectors
+  provider: "local"
+
+  # Vector index provider: "jvector" (local) or "milvus" (remote)
+  vector-provider: "jvector"
+
+  # Metadata storage provider: "sqlite" (local), "postgresql", or "mysql"
+  metadata-provider: "sqlite"
+
+  # Remote database settings (for postgresql/mysql)
+  metadata-host: "localhost"
+  metadata-port: 5432
+  metadata-database: "kitsune"
+  metadata-username: ""
+  metadata-password: ""
+
+  # Milvus settings (if using milvus vector provider)
+  milvus-host: "localhost"
+  milvus-port: 19530
+  milvus-collection: "kitsune_vectors"
+
+# Indexing Configuration
+indexing:
+  # Debounce delay in milliseconds (prevents rapid re-indexing)
+  debounce-delay-ms: 2000
+
+  # Enable/disable hopper transfer indexing
+  hopper-transfers: true
+
+  # Enable/disable hopper minecart deposit indexing
+  hopper-minecart-deposits: true
+
+# Search Configuration
+search:
+  # Default number of results per search
+  default-limit: 10
+
+  # Maximum number of results per search
+  max-limit: 50
+
+  # Search radius in blocks (limits how far away containers will be searched)
+  radius: 50
+
+# Protection Plugin Integration
+protection:
+  # Enable protection checks
+  enabled: true
+
+  # Plugin: "auto" (auto-detect), "lockette", "bolt", or "none"
+  plugin: "auto"
+
+# Search history settings
+history:
+  enabled: true
+  max-entries-per-player: 50
+  max-global-entries: 500
+  retention-days: 30
+
+# Visualizer Configuration
+visualizer:
+  # Enable/disable ItemDisplay entity visualization (shows item icons above containers)
+  item-display-enabled: true
+
+  # Number of items to display using ItemDisplay entities
+  item-display-count: 6
+
+  # Height above containers where ItemDisplay entities are spawned (in blocks)
+  display-height: 2.0
+
+  # Radius of the arc where ItemDisplay entities are positioned (in blocks)
+  display-radius: 1.0
+
+  # Duration that ItemDisplay entities remain visible (in ticks, 20 ticks = 1 second)
+  display-duration-ticks: 200  # 10 seconds
+
+  # Rotation animation settings
+  # Enable/disable items orbiting around container center
+  orbit-enabled: true
+
+  # Orbit speed in degrees per tick (20 ticks = 1 second)
+  orbit-speed: 2.0
+
+  # Enable/disable items spinning on their own axis
+  spin-enabled: true
+
+  # Spin speed in degrees per tick
+  spin-speed: 3.0

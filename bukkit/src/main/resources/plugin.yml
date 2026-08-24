@@ -1,0 +1,22 @@
+name: KitsuneSX
+version: 1.0-SNAPSHOT
+main: org.aincraft.kitsune.KitsunePlugin
+api-version: 1.21
+author: YourName
+description: "Find chests using semantic search commands"
+website: "https://github.com/yourusername/kitsune"
+
+commands:
+  find:
+    description: "Find items in chests using semantic search"
+    usage: "/find <query>"
+    permission: kitsune.use
+    permission-message: "You don't have permission to use the find command"
+
+permissions:
+  kitsune.use:
+    description: "Allows user to search for items in chests"
+    default: true
+  kitsune.admin:
+    description: "Allows user to use admin commands"
+    default: op

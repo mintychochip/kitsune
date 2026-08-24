@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude-context__search_code",
+      "Bash(./gradlew clean:*)",
+      "Bash(./gradlew compileJava:*)",
+      "WebFetch(domain:central.sonatype.com)",
+      "Bash(git add:*)",
+      "Bash(./gradlew build:*)",
+      "Bash(./gradlew :bukkit:compileJava:*)",
+      "Bash(javac:*)",
+      "Bash(gradle build:*)",
+      "Bash(./gradlew :common:compileJava:*)",
+      "Bash(gradle:*)",
+      "Bash(jar tf:*)",
+      "Bash(./gradlew:*)",
+      "mcp__context7__query-docs"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "claude-context"
+  ]
+}
