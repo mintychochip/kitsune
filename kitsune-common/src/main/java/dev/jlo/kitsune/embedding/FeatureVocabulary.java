@@ -32,6 +32,8 @@ public final class FeatureVocabulary {
         );
         map.put("log", Set.of("logs"));
         map.put("logs", Set.of("log"));
+        map.put("plank", Set.of("planks"));
+        map.put("planks", Set.of("plank"));
         ALIASES = Collections.unmodifiableMap(map);
     }
 

@@ -608,6 +608,11 @@ public final class MaterialTaxonomyFeatureProvider implements ItemFeatureProvide
         if (material.contains("CHEST")) {
             descriptor.addTrait("chest");
             descriptor.addTrait("storage");
+            if (material.equals("CHEST") || material.equals("TRAPPED_CHEST")) {
+                addWood(descriptor);
+                descriptor.addCustomTag("wooden");
+                descriptor.addCustomTag("planks");
+            }
         }
         if (material.contains("BARREL")) {
             descriptor.addTrait("barrel");

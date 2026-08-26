@@ -35,6 +35,11 @@ class FullTextQueryTest {
   }
 
   @Test
+  void plankQueryExpandsPlanksAliasInsideTheOnlyGroup() {
+    assertEquals("(\"plank\"* OR \"planks\")", FullTextQuery.parse("plank").matchExpression());
+  }
+
+  @Test
   void parseIsDeterministic() {
     assertEquals(
         FullTextQuery.parse("Oak Plank").matchExpression(),
