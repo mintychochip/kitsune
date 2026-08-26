@@ -12,8 +12,8 @@ plugins {
 include(
     ":kitsune-api",
     ":kitsune-common",
-    ":platform:bukkit",
-    ":kitsune-paper"
+    ":kitsune-paper",
+    ":kitsune-test"
 )
 
 rootProject.name = "kitsune"

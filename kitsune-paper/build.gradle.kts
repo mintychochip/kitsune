@@ -1,7 +1,10 @@
 plugins {
     java
     id("com.gradleup.shadow") version "9.4.3"
-    id("xyz.jpenilla.run-paper") version "3.0.2"
+}
+
+repositories {
+    maven("https://repo.codemc.io/repository/maven-public/")
 }
 
 java {
@@ -12,9 +15,17 @@ java {
 dependencies {
     implementation(project(":kitsune-common"))
     implementation(project(":kitsune-api"))
-    implementation(project(":platform:bukkit"))
-    compileOnly(libs.paper.api)
-    testCompileOnly(libs.paper.api)
+    compileOnly(libs.spigot.api)
+    compileOnly(libs.adventure.api)
+    compileOnly("org.popcraft:bolt-bukkit:1.1.52")
+    testCompileOnly(libs.spigot.api)
+    testCompileOnly(libs.adventure.api)
+    testCompileOnly("org.popcraft:bolt-bukkit:1.1.52")
+    testImplementation(platform("org.junit:junit-bom:${libs.versions.junit.get()}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation(libs.adventure.text.serializer.plain)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly(libs.spigot.api)
 }
 
 tasks.processResources {
@@ -30,15 +41,6 @@ tasks.shadowJar {
 
 tasks.build {
     dependsOn(tasks.shadowJar)
-}
-
-tasks.runServer {
-    minecraftVersion(rootProject.providers.gradleProperty("minecraftVersion").get())
-    pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
-    javaLauncher.set(javaToolchains.launcherFor {
-        languageVersion.set(JavaLanguageVersion.of(25))
-    })
-    jvmArgs("-Dcom.mojang.eula.agree=true")
 }
 
 tasks.test {

@@ -555,7 +555,7 @@ class SqliteIndexRepositoryTest {
     void codecRejectsUnsupportedDescriptorVersion() {
         IllegalArgumentException exception = new IllegalArgumentException("Expected unsupported version");
         try {
-            DescriptorCodec.decode(new byte[]{2});
+            DescriptorCodec.decode(new byte[]{3});
         } catch (IllegalArgumentException ex) {
             exception = ex;
         }

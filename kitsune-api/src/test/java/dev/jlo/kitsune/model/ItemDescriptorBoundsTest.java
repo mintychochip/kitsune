@@ -64,4 +64,40 @@ class ItemDescriptorBoundsTest {
         assertFalse(unbounded.scalarMetadata().isEmpty());
         assertFalse(unbounded.customTags().isEmpty());
     }
+
+    @Test
+    void suppliesBaseHoverPayloadAndPreservesExplicitPayload() {
+        ItemDescriptor base = ItemDescriptor.builder()
+            .materialKey("minecraft:stone")
+            .amount(32)
+            .build();
+
+        assertEquals(
+            ItemHoverPayload.base("minecraft:stone", 32),
+            base.hoverPayload()
+        );
+
+        ItemHoverPayload full = new ItemHoverPayload(
+            "minecraft:diamond_pickaxe",
+            1,
+            "{Damage:7}",
+            java.util.Map.of(
+                "minecraft:enchantments",
+                "{levels:{\"minecraft:mending\":1}}"
+            ),
+            java.util.Set.of("minecraft:repair_cost")
+        );
+        ItemDescriptor enriched = ItemDescriptor.builder()
+            .materialKey("minecraft:diamond_pickaxe")
+            .amount(1)
+            .hoverPayload(full)
+            .buildBounded(256, 256);
+
+        assertEquals(full, enriched.hoverPayload());
+
+        ItemDescriptor copied = enriched.toBuilder()
+            .addCustomTag("taxonomy:pickaxe")
+            .buildBounded(256, 256);
+        assertEquals(full, copied.hoverPayload());
+    }
 }

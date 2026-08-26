@@ -22,6 +22,7 @@ public final class ItemDescriptor {
     private final Set<String> traits;
     private final Map<String, String> scalarMetadata;
     private final Set<String> customTags;
+    private final ItemHoverPayload hoverPayload;
 
     private ItemDescriptor(Builder builder, Bounds bounds) {
         this.materialKey = boundRequired(builder.materialKey, bounds, "Material key");
@@ -33,6 +34,15 @@ public final class ItemDescriptor {
         this.traits = boundedSet(builder.traits, bounds);
         this.scalarMetadata = boundedMetadata(builder.scalarMetadata, bounds);
         this.customTags = boundedSet(builder.customTags, bounds);
+        this.hoverPayload = builder.hoverPayload == null
+            ? ItemHoverPayload.base(this.materialKey, this.amount)
+            : builder.hoverPayload;
+        if (!this.materialKey.equals(this.hoverPayload.itemKey())
+            || this.amount != this.hoverPayload.count()) {
+            throw new IllegalArgumentException(
+                "Hover payload item key and count must match the descriptor"
+            );
+        }
     }
 
     /** @return the material identifier of the item */
@@ -53,12 +63,30 @@ public final class ItemDescriptor {
     public Map<String, String> scalarMetadata() { return scalarMetadata; }
     /** @return custom tags, sorted and unmodifiable */
     public Set<String> customTags() { return customTags; }
+    /** @return the complete persisted item hover payload */
+    public ItemHoverPayload hoverPayload() { return hoverPayload; }
 
     /**
      * @return a new builder for an {@link ItemDescriptor}
      */
     public static Builder builder() {
         return new Builder();
+    }
+
+    /** Returns a builder containing every field of this descriptor. */
+    public Builder toBuilder() {
+        Builder copy = builder()
+            .materialKey(materialKey)
+            .amount(amount)
+            .hoverPayload(hoverPayload);
+        displayText.forEach(copy::addDisplayText);
+        lore.forEach(copy::addLore);
+        enchantments.forEach(copy::addEnchantment);
+        attributes.forEach(copy::addAttribute);
+        traits.forEach(copy::addTrait);
+        scalarMetadata.forEach(copy::addScalarMetadata);
+        customTags.forEach(copy::addCustomTag);
+        return copy;
     }
 
     @Override
@@ -73,7 +101,8 @@ public final class ItemDescriptor {
             && Objects.equals(attributes, that.attributes)
             && Objects.equals(traits, that.traits)
             && Objects.equals(scalarMetadata, that.scalarMetadata)
-            && Objects.equals(customTags, that.customTags);
+            && Objects.equals(customTags, that.customTags)
+            && Objects.equals(hoverPayload, that.hoverPayload);
     }
 
     @Override
@@ -87,7 +116,8 @@ public final class ItemDescriptor {
             attributes,
             traits,
             scalarMetadata,
-            customTags
+            customTags,
+            hoverPayload
         );
     }
 
@@ -208,6 +238,7 @@ public final class ItemDescriptor {
         private final Set<String> traits = new LinkedHashSet<>();
         private final Map<String, String> scalarMetadata = new LinkedHashMap<>();
         private final Set<String> customTags = new LinkedHashSet<>();
+        private ItemHoverPayload hoverPayload;
 
         /**
          * Sets the material identifier.
@@ -234,6 +265,20 @@ public final class ItemDescriptor {
         public Builder amount(int amount) {
             if (amount <= 0) throw new IllegalArgumentException("Amount must be positive");
             this.amount = amount;
+            return this;
+        }
+
+        /**
+         * Sets the complete persisted item hover payload.
+         *
+         * @param hoverPayload payload captured from the source item
+         * @return this builder
+         */
+        public Builder hoverPayload(ItemHoverPayload hoverPayload) {
+            this.hoverPayload = Objects.requireNonNull(
+                hoverPayload,
+                "Hover payload must not be null"
+            );
             return this;
         }
 

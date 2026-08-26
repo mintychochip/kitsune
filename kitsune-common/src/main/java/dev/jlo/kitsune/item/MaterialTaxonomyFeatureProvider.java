@@ -9,8 +9,7 @@ import dev.jlo.kitsune.api.item.ItemFeatureProvider;
 import dev.jlo.kitsune.model.ItemDescriptor;
 
 /**
- * Contributes a material taxonomy to item descriptors, ported from the
- * legacy {@code org.aincraft.kitsune} {@code TagProviders} rules.
+ * Contributes a material taxonomy to item descriptors based on material key patterns.
  *
  * <p>Given a namespaced material key (for example
  * {@code minecraft:diamond_sword}) this provider adds trait tags such as
@@ -72,10 +71,20 @@ public final class MaterialTaxonomyFeatureProvider implements ItemFeatureProvide
     private static void addMaterialTags(String material, ItemDescriptor.Builder descriptor) {
         for (Map.Entry<Predicate<String>, Set<String>> entry : MATERIAL_TAGS.entrySet()) {
             if (entry.getKey().test(material)) {
-                entry.getValue().forEach(descriptor::addTrait);
+                for (String tag : entry.getValue()) {
+                    if ("wood".equals(tag)) {
+                        addWood(descriptor);
+                    } else {
+                        descriptor.addTrait(tag);
+                    }
+                }
                 break;
             }
         }
+    }
+
+    private static void addWood(ItemDescriptor.Builder descriptor) {
+        descriptor.addTrait("wood").addCustomTag("wood");
     }
 
     private static void contributeEnchantment(ItemDescriptor item, ItemDescriptor.Builder descriptor) {
@@ -145,39 +154,39 @@ public final class MaterialTaxonomyFeatureProvider implements ItemFeatureProvide
         }
         if (material.contains("OAK") && !material.contains("DARK_OAK")) {
             descriptor.addTrait("oak");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("SPRUCE")) {
             descriptor.addTrait("spruce");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("BIRCH")) {
             descriptor.addTrait("birch");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("JUNGLE")) {
             descriptor.addTrait("jungle");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("ACACIA")) {
             descriptor.addTrait("acacia");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("DARK_OAK")) {
             descriptor.addTrait("darkoak");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("MANGROVE")) {
             descriptor.addTrait("mangrove");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("CHERRY")) {
             descriptor.addTrait("cherry");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("BAMBOO")) {
             descriptor.addTrait("bamboo");
-            descriptor.addTrait("wood");
+            addWood(descriptor);
         }
         if (material.contains("CRIMSON")) {
             descriptor.addTrait("crimson");

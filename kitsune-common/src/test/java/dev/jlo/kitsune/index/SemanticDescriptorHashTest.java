@@ -1,6 +1,7 @@
 package dev.jlo.kitsune.index;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
+import dev.jlo.kitsune.model.ItemHoverPayload;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -37,6 +38,24 @@ class SemanticDescriptorHashTest {
         SemanticDescriptorHash first = hash(stone(8));
         assertEquals(32, first.bytes().length);
         assertArrayEquals(first.bytes(), hash(stone(8)).bytes());
+    }
+
+    @Test
+    void hoverPayloadDoesNotChangeTheHash() {
+        ItemDescriptor base = stone(1);
+        ItemDescriptor withComponents = ItemDescriptor.builder()
+            .materialKey("minecraft:cobblestone")
+            .amount(1)
+            .hoverPayload(new ItemHoverPayload(
+                "minecraft:cobblestone",
+                1,
+                null,
+                java.util.Map.of("minecraft:custom_name", "'{\"text\":\"Lucky\"}'"),
+                java.util.Set.of()
+            ))
+            .build();
+
+        assertEquals(hash(base), hash(withComponents));
     }
 
     @Test

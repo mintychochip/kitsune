@@ -1,6 +1,7 @@
 package dev.jlo.kitsune.index;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
+import dev.jlo.kitsune.model.ItemHoverPayload;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
@@ -11,6 +12,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Binary codec for {@link ItemDescriptor} serialization.
@@ -22,7 +25,8 @@ import java.util.Map;
  */
 final class DescriptorCodec {
 
-    private static final byte VERSION = 1;
+    private static final byte LEGACY_VERSION = 1;
+    private static final byte VERSION = 2;
 
     /** Maximum number of characters in a single string. */
     static final int MAX_STRING_LENGTH = 65535;
@@ -43,26 +47,31 @@ final class DescriptorCodec {
      * @throws IllegalArgumentException if the encoded payload exceeds the size limit
      */
     static byte[] encode(ItemDescriptor descriptor) {
-        return encode(descriptor, descriptor.amount());
+        return encode(descriptor, descriptor.amount(), true);
     }
 
     /**
-     * Encodes a descriptor for semantic comparison, forcing the amount to 1.
+     * Encodes a descriptor for semantic comparison, forcing the amount to 1
+     * and excluding the non-semantic hover payload.
      *
      * @param descriptor the descriptor to encode, must not be null
      * @return binary encoding of the descriptor with amount 1
      * @throws IllegalArgumentException if the encoded payload exceeds the size limit
      */
     static byte[] encodeSemantic(ItemDescriptor descriptor) {
-        return encode(descriptor, 1);
+        return encode(descriptor, 1, false);
     }
 
-    private static byte[] encode(ItemDescriptor descriptor, int amount) {
+    private static byte[] encode(
+        ItemDescriptor descriptor,
+        int amount,
+        boolean includeHoverPayload
+    ) {
         try {
             var bytes = new BoundedByteArrayOutputStream(
                     MAX_PAYLOAD_BYTES, "Descriptor payload too large");
             try (var output = new DataOutputStream(bytes)) {
-                output.writeByte(VERSION);
+                output.writeByte(includeHoverPayload ? VERSION : LEGACY_VERSION);
                 writeString(output, descriptor.materialKey());
                 output.writeInt(amount);
                 writeStrings(output, descriptor.displayText());
@@ -72,6 +81,9 @@ final class DescriptorCodec {
                 writeStrings(output, new ArrayList<>(descriptor.traits()));
                 writeStringStringMap(output, descriptor.scalarMetadata());
                 writeStrings(output, new ArrayList<>(descriptor.customTags()));
+                if (includeHoverPayload) {
+                    writeHoverPayload(output, descriptor.hoverPayload());
+                }
             }
             if (bytes.size() > MAX_PAYLOAD_BYTES) {
                 throw new IllegalArgumentException("Descriptor payload too large");
@@ -101,7 +113,7 @@ final class DescriptorCodec {
         try {
             try (var dis = new DataInputStream(new ByteArrayInputStream(payload))) {
                 byte version = dis.readByte();
-                if (version != VERSION) {
+                if (version != LEGACY_VERSION && version != VERSION) {
                     throw new IllegalArgumentException("Unsupported descriptor version: " + version);
                 }
                 String materialKey = readString(dis);
@@ -113,6 +125,9 @@ final class DescriptorCodec {
                 List<String> traits = readStrings(dis);
                 Map<String, String> scalarMetadata = readStringStringMap(dis);
                 List<String> customTags = readStrings(dis);
+                ItemHoverPayload hoverPayload = version == VERSION
+                    ? readHoverPayload(dis)
+                    : ItemHoverPayload.base(materialKey, amount);
 
                 if (dis.available() != 0) {
                     throw new IllegalArgumentException("Trailing descriptor bytes");
@@ -120,7 +135,8 @@ final class DescriptorCodec {
 
                 ItemDescriptor.Builder builder = ItemDescriptor.builder()
                         .materialKey(materialKey)
-                        .amount(amount);
+                        .amount(amount)
+                        .hoverPayload(hoverPayload);
                 for (String text : displayText) builder.addDisplayText(text);
                 for (String line : lore) builder.addLore(line);
                 for (Map.Entry<String, Integer> entry : enchantments.entrySet()) {
@@ -139,6 +155,101 @@ final class DescriptorCodec {
         } catch (IOException ex) {
             throw new IllegalArgumentException("Malformed descriptor", ex);
         }
+    }
+    private static void writeHoverPayload(
+        DataOutput output,
+        ItemHoverPayload payload
+    ) throws IOException {
+        writeString(output, payload.itemKey());
+        output.writeInt(payload.count());
+        output.writeBoolean(payload.legacyNbt() != null);
+        if (payload.legacyNbt() != null) {
+            writeLargeString(output, payload.legacyNbt());
+        }
+        writeHoverComponents(output, payload.dataComponents());
+        writeStrings(output, new ArrayList<>(payload.removedDataComponents()));
+    }
+
+    private static ItemHoverPayload readHoverPayload(
+        DataInputStream input
+    ) throws IOException {
+        String itemKey = readString(input);
+        int count = input.readInt();
+        String legacyNbt = input.readBoolean() ? readLargeString(input) : null;
+        Map<String, String> components = readHoverComponents(input);
+        List<String> removedList = readStrings(input);
+        Set<String> removed = new HashSet<>(removedList);
+        if (removed.size() != removedList.size()) {
+            throw new IllegalArgumentException("Duplicate removed data component");
+        }
+        return new ItemHoverPayload(
+            itemKey,
+            count,
+            legacyNbt,
+            components,
+            removed
+        );
+    }
+
+    private static void writeHoverComponents(
+        DataOutput output,
+        Map<String, String> components
+    ) throws IOException {
+        if (components.size() > ItemHoverPayload.MAX_COMPONENTS) {
+            throw new IllegalArgumentException("Too many item data components");
+        }
+        output.writeInt(components.size());
+        List<String> keys = new ArrayList<>(components.keySet());
+        keys.sort(String::compareTo);
+        for (String key : keys) {
+            writeString(output, key);
+            writeLargeString(output, components.get(key));
+        }
+    }
+
+    private static Map<String, String> readHoverComponents(
+        DataInputStream input
+    ) throws IOException {
+        int size = input.readInt();
+        if (size < 0 || size > ItemHoverPayload.MAX_COMPONENTS) {
+            throw new IllegalArgumentException("Invalid item data component count");
+        }
+        Map<String, String> components = new HashMap<>(size);
+        for (int index = 0; index < size; index++) {
+            String key = readString(input);
+            String previous = components.put(key, readLargeString(input));
+            if (previous != null) {
+                throw new IllegalArgumentException("Duplicate item data component");
+            }
+        }
+        return components;
+    }
+
+    private static void writeLargeString(
+        DataOutput output,
+        String value
+    ) throws IOException {
+        if (value == null) {
+            throw new IllegalArgumentException("Null string");
+        }
+        byte[] encoded = encodeUtf8(value);
+        if (encoded.length > MAX_PAYLOAD_BYTES) {
+            throw new IllegalArgumentException("String too long");
+        }
+        output.writeInt(encoded.length);
+        output.write(encoded);
+    }
+
+    private static String readLargeString(DataInputStream input) throws IOException {
+        int length = input.readInt();
+        if (length < 0 || length > MAX_PAYLOAD_BYTES) {
+            throw new IllegalArgumentException("Invalid string length");
+        }
+        byte[] bytes = input.readNBytes(length);
+        if (bytes.length != length) {
+            throw new IllegalArgumentException("Malformed string payload");
+        }
+        return decodeUtf8(bytes);
     }
 
     private static void writeString(DataOutput output, String value) throws IOException {
@@ -168,6 +279,18 @@ final class DescriptorCodec {
             return bytes;
         } catch (java.nio.charset.CharacterCodingException exception) {
             throw new IllegalArgumentException("Malformed UTF-16 string", exception);
+        }
+    }
+
+    private static String decodeUtf8(byte[] bytes) {
+        try {
+            return java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes))
+                .toString();
+        } catch (java.nio.charset.CharacterCodingException exception) {
+            throw new IllegalArgumentException("Malformed UTF-8 string", exception);
         }
     }
 

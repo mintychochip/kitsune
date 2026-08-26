@@ -30,6 +30,8 @@ public final class FeatureVocabulary {
             "mending",
             Set.of("durability", "repair", "restoration")
         );
+        map.put("log", Set.of("logs"));
+        map.put("logs", Set.of("log"));
         ALIASES = Collections.unmodifiableMap(map);
     }
 

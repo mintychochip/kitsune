@@ -1,6 +1,7 @@
 package dev.jlo.kitsune.index;
 
 import dev.jlo.kitsune.model.ItemDescriptor;
+import dev.jlo.kitsune.model.ItemHoverPayload;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -36,6 +37,48 @@ class DescriptorCodecTest {
     }
 
     @Test
+    void roundTripsCompleteHoverPayloadAndDecodesVersionOneFallback() throws Exception {
+        ItemHoverPayload hover = new ItemHoverPayload(
+            "minecraft:diamond_pickaxe",
+            1,
+            "{Damage:7}",
+            java.util.Map.of(
+                "minecraft:custom_name",
+                "'{\"text\":\"Miner\"}'",
+                "minecraft:enchantments",
+                "{levels:{\"minecraft:mending\":1}}"
+            ),
+            java.util.Set.of("minecraft:repair_cost")
+        );
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+            .materialKey("minecraft:diamond_pickaxe")
+            .amount(1)
+            .hoverPayload(hover)
+            .build();
+
+        assertEquals(
+            descriptor,
+            DescriptorCodec.decode(DescriptorCodec.encode(descriptor))
+        );
+
+        ByteArrayOutputStream versionOne = new ByteArrayOutputStream();
+        try (DataOutputStream output = new DataOutputStream(versionOne)) {
+            output.writeByte(1);
+            writeString(output, "minecraft:stone");
+            output.writeInt(16);
+            for (int collection = 0; collection < 7; collection++) {
+                output.writeInt(0);
+            }
+        }
+
+        ItemDescriptor legacy = DescriptorCodec.decode(versionOne.toByteArray());
+        assertEquals(
+            ItemHoverPayload.base("minecraft:stone", 16),
+            legacy.hoverPayload()
+        );
+    }
+
+    @Test
     void rejectsTrailingBytes() {
         byte[] encoded = DescriptorCodec.encode(
                 ItemDescriptor.builder().materialKey("minecraft:stone").amount(1).build());
@@ -58,7 +101,6 @@ class DescriptorCodecTest {
                 .amount(1)
                 .addDisplayText("\uD800")
                 .build();
-
         assertThrows(IllegalArgumentException.class, () -> DescriptorCodec.encode(descriptor));
     }
 
@@ -101,7 +143,7 @@ class DescriptorCodecTest {
     @Test
     void rejectsUnsupportedNullAndOversizedPayloads() {
         assertThrows(IllegalArgumentException.class,
-                () -> DescriptorCodec.decode(new byte[] {2}));
+                () -> DescriptorCodec.decode(new byte[] {3}));
         assertThrows(IllegalArgumentException.class,
                 () -> DescriptorCodec.decode(null));
         assertThrows(IllegalArgumentException.class,

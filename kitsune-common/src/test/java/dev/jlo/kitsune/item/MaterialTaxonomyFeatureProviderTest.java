@@ -7,8 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Verifies the material taxonomy feature provider, ported from the legacy
- * {@code org.aincraft.kitsune} {@code TagProviders} rules.
+ * Verifies the material taxonomy feature provider.
  */
 class MaterialTaxonomyFeatureProviderTest {
 
