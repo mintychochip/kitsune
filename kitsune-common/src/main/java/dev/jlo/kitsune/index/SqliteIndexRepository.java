@@ -125,8 +125,15 @@ public final class SqliteIndexRepository implements IndexRepository {
         try {
             Integer current = currentSchemaVersion();
             if (current != null && current == 3) {
+                connection.setAutoCommit(false);
                 try (Statement statement = connection.createStatement()) {
                     ensureFtsDeleteTriggers(statement);
+                    connection.commit();
+                } catch (RuntimeException | SQLException ex) {
+                    try { connection.rollback(); } catch (SQLException r) { ex.addSuppressed(r); }
+                    throw ex;
+                } finally {
+                    connection.setAutoCommit(true);
                 }
                 return;
             }
