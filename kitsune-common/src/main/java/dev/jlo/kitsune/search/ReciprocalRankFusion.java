@@ -10,7 +10,7 @@ public final class ReciprocalRankFusion {
     double rrf = 0.0;
     rrf += contribution(k, fullTextRank);
     rrf += contribution(k, semanticRank);
-    return Math.min(1.0, rrf * (k + 1) / 2.0);
+    return Math.min(1.0, rrf * ((double) k + 1.0) / 2.0);
   }
 
   private static double contribution(int k, Integer rank) {
@@ -20,6 +20,6 @@ public final class ReciprocalRankFusion {
     if (rank < 1) {
       throw new IllegalArgumentException("Rank must be at least 1");
     }
-    return 1.0 / (k + rank);
+    return 1.0 / ((double) k + rank);
   }
 }
