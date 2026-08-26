@@ -2,9 +2,8 @@ package dev.jlo.kitsune.search;
 
 import dev.jlo.kitsune.embedding.FeatureVocabulary;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 public final class FullTextQuery {
   private final String matchExpression;
@@ -27,7 +26,9 @@ public final class FullTextQuery {
       if (prefix) {
         group.append('*');
       }
-      for (String alias : FeatureVocabulary.aliasesFor(token)) {
+      List<String> aliases = new ArrayList<>(FeatureVocabulary.aliasesFor(token));
+      Collections.sort(aliases);
+      for (String alias : aliases) {
         group.append(" OR ").append(quote(alias));
       }
       group.append(')');
