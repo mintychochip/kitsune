@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -410,6 +411,82 @@ class SqliteIndexRepositoryTest {
             assertEquals(tableCount(connection, "items"), tableCount(connection, "item_search"));
         }
     }
+
+    @Test
+    void migrateUpgradesV1DatabaseThroughEmbeddingsCacheAndFts(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("v1-to-v3.db");
+        UUID worldId = UUID.randomUUID();
+        BlockKey root = new BlockKey(worldId, 0, 64, 0);
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+                .materialKey("minecraft:oak_planks")
+                .amount(1)
+                .build();
+        EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+        Embedding embedding = provider.embed(descriptor);
+        createV1Database(database, root, descriptor, embedding);
+
+        try (IndexRepository repository = SqliteIndexRepository.open(database);
+             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            assertEquals(3, schemaVersion(connection));
+            try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM embeddings");
+                 ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1));
+            }
+            assertEquals(tableCount(connection, "items"), tableCount(connection, "item_search"));
+            assertTrue(tableExists(connection, "item_fts"));
+
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT OR REPLACE INTO chunks (world_uuid, chunk_x, chunk_z, available, revision) "
+                            + "VALUES (?, ?, ?, 1, 1)")) {
+                ps.setString(1, worldId.toString());
+                ps.setInt(2, root.chunkKey().x());
+                ps.setInt(3, root.chunkKey().z());
+                ps.executeUpdate();
+            }
+
+            Map<BlockKey, List<IndexedItem>> documents =
+                    repository.loadDocuments(Set.of(root), provider);
+            IndexedItem loaded = documents.get(root).getFirst();
+            assertEquals("minecraft:oak_planks", loaded.descriptor().materialKey());
+            assertArrayEquals(embedding.encode(), loaded.embedding().encode());
+            assertEquals(embedding.norm(), loaded.embedding().norm(), 1e-9);
+        }
+    }
+
+    @Test
+    void migrateRejectsUnsupportedSchemaVersion(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("v2-unsupported.db");
+        BlockKey root = new BlockKey(UUID.randomUUID(), 0, 64, 0);
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+                .materialKey("minecraft:oak_planks")
+                .amount(1)
+                .build();
+        EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+        Embedding embedding = provider.embed(descriptor);
+        createV2Database(database, root, descriptor, embedding, null);
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            connection.setAutoCommit(true);
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "UPDATE schema_metadata SET value = ? WHERE key = ?")) {
+                ps.setString(1, "99");
+                ps.setString(2, "schema_version");
+                ps.executeUpdate();
+            }
+        }
+
+        SQLException failure = assertThrows(
+                SQLException.class,
+                () -> SqliteIndexRepository.open(database));
+        assertTrue(failure.getMessage().contains("Unsupported schema version: 99"));
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            assertEquals(99, schemaVersion(connection));
+            assertFalse(tableExists(connection, "item_fts"));
+        }
+    }
+
 
     @Test
     void deletionCascadesDocuments(@TempDir Path tempDir) throws Exception {
@@ -1036,6 +1113,51 @@ class SqliteIndexRepositoryTest {
             }
         }
     }
+
+    private static void createV1Database(
+            Path database,
+            BlockKey root,
+            ItemDescriptor descriptor,
+            Embedding embedding)
+            throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
+             java.sql.Statement statement = connection.createStatement()) {
+            for (String sql : v1Statements()) {
+                statement.execute(sql);
+            }
+            statement.execute("INSERT INTO schema_metadata (key, value) VALUES ('schema_version', '1')");
+            statement.execute(
+                    "INSERT INTO containers (world_uuid, x, y, z, chunk_x, chunk_z, block_type, fingerprint, revision) "
+                            + "VALUES ('"
+                            + root.worldId()
+                            + "', "
+                            + root.x()
+                            + ", "
+                            + root.y()
+                            + ", "
+                            + root.z()
+                            + ", "
+                            + root.chunkKey().x()
+                            + ", "
+                            + root.chunkKey().z()
+                            + ", 'chest', X'010203', 1)");
+            try (PreparedStatement insertItem = connection.prepareStatement(
+                    "INSERT INTO items (container_id, path, amount, descriptor, provider_id, provider_version, vector, vector_norm) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                ItemPath path = new ItemPath(List.of(new ItemPathStep("Storage", 0)));
+                insertItem.setInt(1, 1);
+                insertItem.setBytes(2, ItemPathCodec.encode(path));
+                insertItem.setInt(3, descriptor.amount());
+                insertItem.setBytes(4, DescriptorCodec.encode(descriptor));
+                insertItem.setString(5, embedding.providerId());
+                insertItem.setInt(6, embedding.providerVersion());
+                insertItem.setBytes(7, embedding.encode());
+                insertItem.setDouble(8, embedding.norm());
+                insertItem.executeUpdate();
+            }
+        }
+    }
+
 
     private static List<String> v2Statements() throws Exception {
         try (var input = SqliteIndexRepository.class.getClassLoader()
