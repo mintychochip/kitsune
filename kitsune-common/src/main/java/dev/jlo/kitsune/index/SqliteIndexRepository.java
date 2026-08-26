@@ -125,6 +125,9 @@ public final class SqliteIndexRepository implements IndexRepository {
         try {
             Integer current = currentSchemaVersion();
             if (current != null && current == 3) {
+                try (Statement statement = connection.createStatement()) {
+                    ensureFtsDeleteTriggers(statement);
+                }
                 return;
             }
             if (current != null && current != 1 && current != 2) {
@@ -377,49 +380,14 @@ public final class SqliteIndexRepository implements IndexRepository {
 
     @Override
     public void deleteRoot(BlockKey key) throws SQLException {
-        connection.setAutoCommit(false);
-        Throwable primary = null;
-        try {
-            Integer containerId = null;
-            try (PreparedStatement find = connection.prepareStatement(
-                    "SELECT id FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
-                find.setString(1, key.worldId().toString());
-                find.setInt(2, key.x());
-                find.setInt(3, key.y());
-                find.setInt(4, key.z());
-                try (ResultSet rs = find.executeQuery()) {
-                    if (rs.next()) {
-                        containerId = rs.getInt(1);
-                    }
-                }
-            }
-            if (containerId != null) {
-                }
-            try (PreparedStatement deleteContainer = connection.prepareStatement(
-                    "DELETE FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
-                deleteContainer.setString(1, key.worldId().toString());
-                deleteContainer.setInt(2, key.x());
-                deleteContainer.setInt(3, key.y());
-                deleteContainer.setInt(4, key.z());
-                deleteContainer.executeUpdate();
-            }
-            connection.commit();
-        } catch (RuntimeException | SQLException ex) {
-            primary = ex;
-            try { connection.rollback(); } catch (SQLException r) { ex.addSuppressed(r); }
-            throw ex;
-        } finally {
-            try {
-                connection.setAutoCommit(true);
-            } catch (SQLException restoreEx) {
-                if (primary instanceof SQLException sqlEx) {
-                    sqlEx.addSuppressed(restoreEx);
-                } else if (primary instanceof RuntimeException runtimeEx) {
-                    runtimeEx.addSuppressed(restoreEx);
-                } else if (primary == null) {
-                    throw restoreEx;
-                }
-            }
+        connection.setAutoCommit(true);
+        try (PreparedStatement deleteContainer = connection.prepareStatement(
+                "DELETE FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
+            deleteContainer.setString(1, key.worldId().toString());
+            deleteContainer.setInt(2, key.x());
+            deleteContainer.setInt(3, key.y());
+            deleteContainer.setInt(4, key.z());
+            deleteContainer.executeUpdate();
         }
     }
 

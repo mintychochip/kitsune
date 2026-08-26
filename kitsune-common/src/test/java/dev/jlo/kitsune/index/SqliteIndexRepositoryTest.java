@@ -1425,6 +1425,85 @@ class SqliteIndexRepositoryTest {
         }
     }
 
+    @Test
+    void repairOfExistingV3DatabaseRemovesStaleFtsPostings(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("v3-old-triggers.db");
+        UUID worldId = UUID.randomUUID();
+        BlockKey root = new BlockKey(worldId, 0, 64, 0);
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+                .materialKey("minecraft:diamond_pickaxe")
+                .amount(1)
+                .build();
+        EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+        Embedding embedding = provider.embed(descriptor);
+        createV3DatabaseWithOldBadTriggers(database, root, descriptor, embedding);
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            assertEquals(3, schemaVersion(connection));
+            assertTrue(triggerSql(connection, "item_search_ad").contains("VALUES('delete', old.item_id)"));
+            assertFalse(triggerSql(connection, "item_search_ad").contains("old.material"));
+        }
+
+        IndexRepository repository = SqliteIndexRepository.open(database);
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            assertEquals(3, schemaVersion(connection));
+            String deleteTrigger = triggerSql(connection, "item_search_ad");
+            assertTrue(deleteTrigger.contains("old.material"));
+            assertTrue(deleteTrigger.contains("old.display"));
+        }
+
+        repository.setChunkAvailable(root.chunkKey(), true, 1);
+        repository.replaceRoot(
+                new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3},
+                        List.of(new IndexedItem(
+                                new ItemPath(List.of(new ItemPathStep("Storage", 0))),
+                                1,
+                                descriptor,
+                                embedding))),
+                1);
+        ChunkKey chunk = root.chunkKey();
+        String diamExpression = FullTextQuery.parse("diam").matchExpression();
+        assertEquals(1, repository.findFullTextMatches(
+                diamExpression, worldId, chunk.x(), chunk.x(), chunk.z(), chunk.z(), 10).size());
+
+        ItemDescriptor replacement = ItemDescriptor.builder()
+                .materialKey("minecraft:oak_planks")
+                .amount(1)
+                .build();
+        repository.replaceRoot(
+                new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3},
+                        List.of(new IndexedItem(
+                                new ItemPath(List.of(new ItemPathStep("Storage", 0))),
+                                1,
+                                replacement,
+                                provider.embed(replacement)))),
+                2);
+        assertTrue(repository.findFullTextMatches(
+                diamExpression, worldId, chunk.x(), chunk.x(), chunk.z(), chunk.z(), 10).isEmpty());
+        assertEquals(1, repository.findFullTextMatches(
+                FullTextQuery.parse("oak").matchExpression(),
+                worldId, chunk.x(), chunk.x(), chunk.z(), chunk.z(), 10).size());
+
+        repository.deleteRoot(root);
+        assertTrue(repository.findFullTextMatches(
+                FullTextQuery.parse("oak").matchExpression(),
+                worldId, chunk.x(), chunk.x(), chunk.z(), chunk.z(), 10).isEmpty());
+
+        repository.replaceRoot(
+                new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3},
+                        List.of(new IndexedItem(
+                                new ItemPath(List.of(new ItemPathStep("Storage", 0))),
+                                1,
+                                replacement,
+                                provider.embed(replacement)))),
+                3);
+        assertEquals(1, repository.findFullTextMatches(
+                FullTextQuery.parse("oak").matchExpression(),
+                worldId, chunk.x(), chunk.x(), chunk.z(), chunk.z(), 10).size());
+        repository.close();
+    }
+
+
 
     private static List<String> v2Statements() throws Exception {
         try (var input = SqliteIndexRepository.class.getClassLoader()
@@ -1494,6 +1573,80 @@ class SqliteIndexRepositoryTest {
                 rs.next();
                 return rs.getInt(1);
             }
+        }
+    }
+
+
+    private static String triggerSql(Connection connection, String triggerName) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")) {
+            ps.setString(1, triggerName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException("Missing trigger: " + triggerName);
+                }
+                return rs.getString(1);
+            }
+        }
+    }
+
+    private static void createV3DatabaseWithOldBadTriggers(
+            Path database,
+            BlockKey root,
+            ItemDescriptor descriptor,
+            Embedding embedding)
+            throws Exception {
+        createV2Database(database, root, descriptor, embedding, null);
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
+             java.sql.Statement statement = connection.createStatement()) {
+            for (String sql : v3Statements()) {
+                statement.execute(sql);
+            }
+            try (PreparedStatement select = connection.prepareStatement("SELECT id, descriptor FROM items");
+                 ResultSet rs = select.executeQuery();
+                 PreparedStatement insert = connection.prepareStatement(
+                         "INSERT INTO item_search (item_id, material, display, tags, enchantments, lore) "
+                                 + "VALUES (?, ?, ?, ?, ?, ?)")) {
+                while (rs.next()) {
+                    ItemSearchDocument document = ItemSearchProjector.project(
+                            DescriptorCodec.decode(rs.getBytes(2)));
+                    insert.setLong(1, rs.getLong(1));
+                    insert.setString(2, document.material());
+                    insert.setString(3, document.display());
+                    insert.setString(4, document.tags());
+                    insert.setString(5, document.enchantments());
+                    insert.setString(6, document.lore());
+                    insert.executeUpdate();
+                }
+            }
+            statement.execute("DROP TRIGGER IF EXISTS item_search_ad");
+            statement.execute("DROP TRIGGER IF EXISTS item_search_au");
+            statement.execute(
+                    "CREATE TRIGGER item_search_ad AFTER DELETE ON item_search BEGIN "
+                            + "INSERT INTO item_fts(item_fts, rowid) VALUES('delete', old.item_id); "
+                            + "END");
+            statement.execute(
+                    "CREATE TRIGGER item_search_au AFTER UPDATE ON item_search BEGIN "
+                            + "INSERT INTO item_fts(item_fts, rowid) VALUES('delete', old.item_id); "
+                            + "INSERT INTO item_fts(rowid, material, display, tags, enchantments, lore) "
+                            + "VALUES (new.item_id, new.material, new.display, new.tags, new.enchantments, new.lore); "
+                            + "END");
+            statement.execute(
+                    "INSERT INTO schema_metadata (key, value) VALUES ('schema_version', '3') "
+                            + "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+        }
+    }
+
+    private static List<String> v3Statements() throws Exception {
+        try (var input = SqliteIndexRepository.class.getClassLoader()
+                .getResourceAsStream("db/migration/V3__item_fts.sql")) {
+            if (input == null) {
+                throw new IllegalStateException("Missing migration V3__item_fts.sql");
+            }
+            String sql = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n");
+            return SqliteIndexRepository.splitStatements(sql);
         }
     }
 
