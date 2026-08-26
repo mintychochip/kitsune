@@ -16,7 +16,7 @@ inside chests, barrels, shulker boxes, bundles, and other nearby containers.
 - **Nested container support** — searches through shulker boxes, bundles, and other nested inventories.
 - **Protection-aware** — optional soft-dependency on [LWC](https://github.com/Hidendra/LWC) prevents players from seeing items they cannot access.
 - **World markers** — highlights matching containers briefly so players can find them.
-- **Embeddings-based ranking** — uses a configurable embedding provider to score how similar an item is to your query.
+- **Hybrid ranking** — always combines SQLite FTS5 full-text matches with configurable embedding-cosine results, fusing both ranked lists into one using Reciprocal Rank Fusion.
 - **SQLite-backed index** — persists the index across restarts and reuses it for fast repeated searches.
 - **Async, tick-budgeted indexing** — spreads chunk and container scanning across ticks to avoid lag.
 - **Configurable radius, scoring, and limits** — tune search behavior for your server.
@@ -52,6 +52,10 @@ search:
   radius: 32
   max-radius: 128
   minimum-score: 0.30
+  hybrid:
+    rrf-k: 60
+    full-text-limit: 64
+    semantic-limit: 64
   max-results: 32
   max-paths-per-root: 16
   warmup-timeout-seconds: 3
@@ -69,7 +73,11 @@ embedding:
 
 - `search.radius` — starting search radius around the player.
 - `search.max-radius` — farthest the search is allowed to expand.
-- `search.minimum-score` — similarity threshold; lower values return more results.
+- `search.minimum-score` — similarity threshold applied to the semantic retriever before fusion; lower values return more semantic results.
+- `search.hybrid.rrf-k` — Reciprocal Rank Fusion constant.
+- `search.hybrid.full-text-limit` — maximum number of SQLite FTS5 full-text matches considered.
+- `search.hybrid.semantic-limit` — maximum number of embedding-cosine matches considered.
+- Verbose output shows the normalized fused score in the range `[0,1]`.
 - `search.max-results` — total matches shown.
 - `search.max-paths-per-root` — distinct paths kept per container root.
 - `search.warmup-timeout-seconds` — how long a search waits for the index to warm up.
