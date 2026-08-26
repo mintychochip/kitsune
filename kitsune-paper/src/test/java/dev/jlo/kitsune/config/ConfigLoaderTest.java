@@ -43,6 +43,9 @@ class ConfigLoaderTest {
         assertEquals(32, loaded.radius());
         assertEquals(0.30, loaded.minimumScore());
         assertEquals(4, loaded.maximumDepth());
+        assertEquals(60, loaded.rrfK());
+        assertEquals(64, loaded.fullTextLimit());
+        assertEquals(64, loaded.semanticLimit());
     }
 
     /**
@@ -138,5 +141,50 @@ class ConfigLoaderTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> ConfigLoader.load(cfg));
         assertEquals("Invalid minimum score", ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidHybridRrfK() {
+        MemoryConfiguration cfg = validConfiguration();
+        cfg.set("search.hybrid.rrf-k", 0);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ConfigLoader.load(cfg));
+        assertEquals("Invalid hybrid rrf k", ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidHybridFullTextLimit() {
+        MemoryConfiguration cfg = validConfiguration();
+        cfg.set("search.hybrid.full-text-limit", 0);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ConfigLoader.load(cfg));
+        assertEquals("Invalid hybrid full-text limit", ex.getMessage());
+    }
+
+    @Test
+    void rejectsInvalidHybridSemanticLimit() {
+        MemoryConfiguration cfg = validConfiguration();
+        cfg.set("search.hybrid.semantic-limit", 257);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> ConfigLoader.load(cfg));
+        assertEquals("Invalid hybrid semantic limit", ex.getMessage());
+    }
+
+    private static MemoryConfiguration validConfiguration() {
+        MemoryConfiguration cfg = new MemoryConfiguration();
+        cfg.set("search.radius", 32);
+        cfg.set("search.max-radius", 128);
+        cfg.set("search.minimum-score", 0.30);
+        cfg.set("search.max-results", 32);
+        cfg.set("search.max-paths-per-root", 16);
+        cfg.set("search.warmup-timeout-seconds", 3);
+        cfg.set("markers.duration-seconds", 20);
+        cfg.set("index.chunks-per-tick", 2);
+        cfg.set("index.roots-per-tick", 8);
+        cfg.set("index.reconciliation-period-ticks", 200);
+        cfg.set("index.maximum-depth", 4);
+        cfg.set("index.maximum-stacks-per-root", 4096);
+        cfg.set("embedding.provider", "builtin:sparse-v1");
+        return cfg;
     }
 }

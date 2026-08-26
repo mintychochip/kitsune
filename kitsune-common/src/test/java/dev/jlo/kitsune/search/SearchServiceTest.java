@@ -84,7 +84,7 @@ class SearchServiceTest {
             scoreMatch("allowed", 0.99, 0));
         RootSeed denied = seedRoot(2, 64, 0, true, false,
             scoreMatch("denied-stack", 0.98, 0));
-        SearchPolicy policy = new SearchPolicy(16, 0.80, 10, 4, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(16, 0.80, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
 
         try (SearchHarness harness = SearchHarness.create(policy, denied, allowed)) {
             SearchOutcome outcome = harness.search("diamond");
@@ -128,7 +128,7 @@ class SearchServiceTest {
 
     @Test
     void totalCountsExcludeDeniedAndRootsAreAppliedAfterAccess() throws Exception {
-        SearchPolicy policy = new SearchPolicy(32, 0.75, 2, 4, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 2, 4, Duration.ofSeconds(1), 60, 64, 64);
         RootSeed topOne = seedRoot(-3, 64, 0, false, false, scoreMatch("a", 0.90, 0));
         RootSeed topTwo = seedRoot(-2, 64, 0, false, false, scoreMatch("b", 0.89, 0));
         RootSeed denied = seedRoot(-1, 64, 0, true, false, scoreMatch("c", 0.88, 0));
@@ -162,7 +162,7 @@ class SearchServiceTest {
 
     @Test
     void candidatePagesKeepGlobalCountsAndBestRoot() throws Exception {
-        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1), 60, 64, 64);
         List<RootSeed> roots = new ArrayList<>();
         for (int index = 0; index < 129; index++) {
             double score = index == 128 ? 0.99 : 0.80;
@@ -192,7 +192,7 @@ class SearchServiceTest {
             scoreMatch("middle", 0.84, 1),
             scoreMatch("low", 0.76, 2)
         );
-        SearchPolicy policy = new SearchPolicy(32, 0.50, 3, 2, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(32, 0.50, 3, 2, Duration.ofSeconds(1), 60, 64, 64);
 
         try (SearchHarness harness = SearchHarness.create(policy, packed)) {
             SearchOutcome outcome = harness.search("diamond");
@@ -241,7 +241,7 @@ class SearchServiceTest {
 
     @Test
     void warmupTimeoutReturnsIndexWarmingAndDoesNotLoadDocuments() throws Exception {
-        SearchPolicy policy = new SearchPolicy(16, 0.40, 10, 4, Duration.ofMillis(250));
+        SearchPolicy policy = new SearchPolicy(16, 0.40, 10, 4, Duration.ofMillis(250), 60, 64, 64);
         RootSeed packed = seedRoot(2, 64, 0, false, false, scoreMatch("a", 0.99, 0));
 
         try (SearchHarness harness = SearchHarness.create(policy, packed)) {
@@ -275,7 +275,7 @@ class SearchServiceTest {
 
     @Test
     void emptyScoresReturnNoMatchesButStillUseMatchingRoots() throws Exception {
-        SearchPolicy policy = new SearchPolicy(16, 0.90, 10, 3, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(16, 0.90, 10, 3, Duration.ofSeconds(1), 60, 64, 64);
         RootSeed packed = seedRoot(2, 64, 0, false, false,
             scoreMatch("a", 0.70, 0),
             scoreMatch("b", 0.71, 1));
@@ -292,7 +292,7 @@ class SearchServiceTest {
 
     @Test
     void negativeCosineIsValidAndCanBeFiltered() throws Exception {
-        SearchPolicy policy = new SearchPolicy(16, 0.0, 10, 3, Duration.ofSeconds(1));
+        SearchPolicy policy = new SearchPolicy(16, 0.0, 10, 3, Duration.ofSeconds(1), 60, 64, 64);
         RootSeed packed = seedRoot(2, 64, 0, false, false,
             scoreMatch("opposite", -0.25, 0));
 
@@ -325,7 +325,7 @@ class SearchServiceTest {
     }
 
     private static SearchPolicy defaultPolicy() {
-        return new SearchPolicy(16, 0.75, 10, 4, Duration.ofSeconds(1));
+        return new SearchPolicy(16, 0.75, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
     }
 
     private static RootSeed seedRoot(int x,

@@ -4,7 +4,8 @@ import java.time.Duration;
 import java.util.Objects;
 
 /** Configures search radius, ranking thresholds, result limits, and warmup time. */
-public record SearchPolicy(int radius, double minimumScore, int maxResults, int maxPathsPerRoot, Duration warmupTimeout) {
+public record SearchPolicy(int radius, double minimumScore, int maxResults, int maxPathsPerRoot,
+                           Duration warmupTimeout, int rrfK, int fullTextLimit, int semanticLimit) {
     /** Validates the policy bounds and timeout. */
     public SearchPolicy {
         if (radius < 1 || radius > 128) {
@@ -24,6 +25,15 @@ public record SearchPolicy(int radius, double minimumScore, int maxResults, int 
             || warmupTimeout.isZero()
             || warmupTimeout.compareTo(Duration.ofSeconds(30)) > 0) {
             throw new IllegalArgumentException("Warmup timeout must be positive and at most 30 seconds");
+        }
+        if (rrfK < 1 || rrfK > 1000) {
+            throw new IllegalArgumentException("Hybrid RRF k must be between 1 and 1000");
+        }
+        if (fullTextLimit < 1 || fullTextLimit > 256) {
+            throw new IllegalArgumentException("Hybrid full-text limit must be between 1 and 256");
+        }
+        if (semanticLimit < 1 || semanticLimit > 256) {
+            throw new IllegalArgumentException("Hybrid semantic limit must be between 1 and 256");
         }
     }
 }

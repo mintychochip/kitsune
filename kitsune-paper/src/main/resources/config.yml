@@ -5,6 +5,10 @@ search:
   max-results: 32
   max-paths-per-root: 16
   warmup-timeout-seconds: 3
+  hybrid:
+    rrf-k: 60
+    full-text-limit: 64
+    semantic-limit: 64
 markers:
   duration-seconds: 20
 index:

@@ -32,9 +32,13 @@ public final class ConfigLoader {
         int reconciliationPeriodTicks = config.getInt("index.reconciliation-period-ticks");
         int maximumDepth = config.getInt("index.maximum-depth");
         int maximumStacksPerRoot = config.getInt("index.maximum-stacks-per-root");
+        int rrfK = config.getInt("search.hybrid.rrf-k", 60);
+        int fullTextLimit = config.getInt("search.hybrid.full-text-limit", 64);
+        int semanticLimit = config.getInt("search.hybrid.semantic-limit", 64);
         String embeddingProvider = config.getString("embedding.provider");
         return KitsuneConfig.validated(radius, maxRadius, minimumScore, maxResults, maxPathsPerRoot,
                 warmupTimeoutSeconds, markerDurationSeconds, chunksPerTick, rootsPerTick,
-                reconciliationPeriodTicks, maximumDepth, maximumStacksPerRoot, embeddingProvider);
+                reconciliationPeriodTicks, maximumDepth, maximumStacksPerRoot, rrfK, fullTextLimit,
+                semanticLimit, embeddingProvider);
     }
 }

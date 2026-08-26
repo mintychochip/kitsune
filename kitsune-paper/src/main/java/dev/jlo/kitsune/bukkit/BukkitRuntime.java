@@ -379,7 +379,10 @@ public final class BukkitRuntime implements AutoCloseable {
                 open.config().minimumScore(),
                 open.config().maxResults(),
                 open.config().maxPathsPerRoot(),
-                Duration.ofSeconds(open.config().warmupTimeoutSeconds())
+                Duration.ofSeconds(open.config().warmupTimeoutSeconds()),
+                open.config().rrfK(),
+                open.config().fullTextLimit(),
+                open.config().semanticLimit()
             );
             BukkitServerThreadBridge serverThread = new BukkitServerThreadBridge(plugin);
             ProtectionRegistry protectionRegistry = new ProtectionRegistry(

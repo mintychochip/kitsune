@@ -10,7 +10,8 @@ package dev.jlo.kitsune.config;
 public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int maxResults,
                             int maxPathsPerRoot, int warmupTimeoutSeconds, int markerDurationSeconds,
                             int chunksPerTick, int rootsPerTick, int reconciliationPeriodTicks,
-                            int maximumDepth, int maximumStacksPerRoot, String embeddingProvider) {
+                            int maximumDepth, int maximumStacksPerRoot, int rrfK, int fullTextLimit,
+                            int semanticLimit, String embeddingProvider) {
 
     /**
      * Validates all configuration values and returns a config only when every bound holds.
@@ -27,6 +28,9 @@ public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int 
      * @param reconciliationPeriodTicks reconciliation period in ticks, between 20 and 72000
      * @param maximumDepth maximum traversal depth, between 1 and 8
      * @param maximumStacksPerRoot maximum stacks stored per root, between 1 and 16384
+     * @param rrfK reciprocal rank fusion constant, between 1 and 1000
+     * @param fullTextLimit maximum full-text retriever results, between 1 and 256
+     * @param semanticLimit maximum semantic retriever results, between 1 and 256
      * @param embeddingProvider identifier of the configured embedding provider, non-blank
      * @return a validated configuration
      * @throws IllegalArgumentException if any value is outside its permitted range
@@ -36,7 +40,8 @@ public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int 
                                           int warmupTimeoutSeconds, int markerDurationSeconds,
                                           int chunksPerTick, int rootsPerTick,
                                           int reconciliationPeriodTicks, int maximumDepth,
-                                          int maximumStacksPerRoot, String embeddingProvider) {
+                                          int maximumStacksPerRoot, int rrfK, int fullTextLimit,
+                                          int semanticLimit, String embeddingProvider) {
         if (radius < 1 || maxRadius < 1 || maxRadius > 128 || radius > maxRadius)
             throw invalid("search radius");
         if (!Double.isFinite(minimumScore) || minimumScore < 0.0 || minimumScore > 1.0)
@@ -57,11 +62,18 @@ public record KitsuneConfig(int radius, int maxRadius, double minimumScore, int 
             throw invalid("maximum depth");
         if (maximumStacksPerRoot < 1 || maximumStacksPerRoot > 16_384)
             throw invalid("maximum stacks per root");
+        if (rrfK < 1 || rrfK > 1000)
+            throw invalid("hybrid rrf k");
+        if (fullTextLimit < 1 || fullTextLimit > 256)
+            throw invalid("hybrid full-text limit");
+        if (semanticLimit < 1 || semanticLimit > 256)
+            throw invalid("hybrid semantic limit");
         if (embeddingProvider == null || embeddingProvider.isBlank())
             throw invalid("embedding provider");
         return new KitsuneConfig(radius, maxRadius, minimumScore, maxResults, maxPathsPerRoot,
                 warmupTimeoutSeconds, markerDurationSeconds, chunksPerTick, rootsPerTick,
-                reconciliationPeriodTicks, maximumDepth, maximumStacksPerRoot, embeddingProvider);
+                reconciliationPeriodTicks, maximumDepth, maximumStacksPerRoot, rrfK, fullTextLimit,
+                semanticLimit, embeddingProvider);
     }
 
     /** Builds an {@link IllegalArgumentException} naming the offending configuration category. */
