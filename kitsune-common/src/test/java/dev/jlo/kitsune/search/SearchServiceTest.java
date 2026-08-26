@@ -162,7 +162,7 @@ class SearchServiceTest {
 
     @Test
     void candidatePagesKeepGlobalCountsAndBestRoot() throws Exception {
-        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1), 60, 64, 256);
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1), 60, 64, 64);
         List<RootSeed> roots = new ArrayList<>();
         for (int index = 0; index < 129; index++) {
             double score = index == 128 ? 0.99 : 0.80;
@@ -175,13 +175,32 @@ class SearchServiceTest {
             SearchOutcome outcome = harness.search("diamond");
 
             assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
-            assertEquals(129, outcome.totalAccessibleMatchingRoots());
-            assertEquals(129, outcome.totalAccessibleMatchingStacks());
+            assertEquals(64, outcome.totalAccessibleMatchingStacks());
+            assertEquals(64, outcome.totalAccessibleMatchingRoots());
             assertEquals(lateBest.identity().key(), outcome.roots().getFirst().key());
+            assertEquals(0.5, outcome.roots().getFirst().bestScore());
             assertEquals(2, harness.findCandidateCalls());
             assertEquals(2, harness.loadDocumentCalls());
             assertEquals(List.of(128, 1), harness.candidatePageSizes());
             assertEquals(List.of(128, 1), harness.validationBatchSizes());
+        }
+    }
+
+    @Test
+    void semanticLimitCapsFusedStackCountAfterGlobalSort() throws Exception {
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
+        List<RootSeed> roots = new ArrayList<>();
+        for (int index = 0; index < 70; index++) {
+            roots.add(seedRoot(0, 64 + index, 0, false, false,
+                scoreMatch("item-" + index, 0.90, index)));
+        }
+
+        try (SearchHarness harness = SearchHarness.create(policy, roots)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(64, outcome.totalAccessibleMatchingStacks());
+            assertEquals(64, outcome.totalAccessibleMatchingRoots());
         }
     }
 
