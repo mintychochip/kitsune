@@ -89,4 +89,36 @@ public interface IndexRepository extends AutoCloseable {
 
     /** Recomputes embeddings for all persisted searchable documents. */
     void reembedAll(EmbeddingProvider provider) throws SQLException;
+
+    /** A full-text search hit with BM25 rank and item metadata. */
+    record FullTextMatch(
+        RootIdentity root,
+        ItemPath path,
+        int amount,
+        ItemDescriptor descriptor,
+        double bm25
+    ) {}
+
+    /**
+     * Finds items matching a prepared FTS5 MATCH expression within chunk bounds.
+     *
+     * @param matchExpression FTS5 MATCH expression (never concatenated into SQL)
+     * @param worldId world containing candidate roots
+     * @param minChunkX inclusive minimum chunk X coordinate
+     * @param maxChunkX inclusive maximum chunk X coordinate
+     * @param minChunkZ inclusive minimum chunk Z coordinate
+     * @param maxChunkZ inclusive maximum chunk Z coordinate
+     * @param limit maximum number of hits to return
+     * @return hits ordered by BM25 rank ascending
+     */
+    List<FullTextMatch> findFullTextMatches(
+        String matchExpression,
+        UUID worldId,
+        int minChunkX,
+        int maxChunkX,
+        int minChunkZ,
+        int maxChunkZ,
+        int limit
+    ) throws SQLException;
+
 }

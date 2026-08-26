@@ -166,6 +166,20 @@ class BukkitRuntimeLifecycleTest {
             @Override
             public void deleteRoot(BlockKey key) {}
 
+
+            @Override
+            public java.util.List<IndexRepository.FullTextMatch> findFullTextMatches(
+                    String matchExpression,
+                    java.util.UUID worldId,
+                    int minChunkX,
+                    int maxChunkX,
+                    int minChunkZ,
+                    int maxChunkZ,
+                    int limit
+            ) {
+                return java.util.List.of();
+            }
+
             @Override
             public void reembedAll(EmbeddingProvider provider) {}
 

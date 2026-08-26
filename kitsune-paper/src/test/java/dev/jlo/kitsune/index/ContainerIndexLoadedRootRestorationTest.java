@@ -488,6 +488,20 @@ class ContainerIndexLoadedRootRestorationTest {
             return Map.of();
         }
 
+
+        @Override
+        public List<IndexRepository.FullTextMatch> findFullTextMatches(
+                String matchExpression,
+                java.util.UUID worldId,
+                int minChunkX,
+                int maxChunkX,
+                int minChunkZ,
+                int maxChunkZ,
+                int limit
+        ) {
+            return List.of();
+        }
+
         @Override
         public void reembedAll(EmbeddingProvider provider) {}
 

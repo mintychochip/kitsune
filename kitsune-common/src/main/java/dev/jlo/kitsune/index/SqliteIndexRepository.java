@@ -139,6 +139,7 @@ public final class SqliteIndexRepository implements IndexRepository {
                     applyMigration(statement, "V2__embeddings_cache.sql");
                 }
                 applyMigration(statement, "V3__item_fts.sql");
+                ensureFtsDeleteTriggers(statement);
                 backfillItemSearch();
                 verifyItemSearchCounts();
                 try (PreparedStatement ps = connection.prepareStatement(
@@ -171,6 +172,24 @@ public final class SqliteIndexRepository implements IndexRepository {
                 }
             }
         }
+    }
+
+
+    private void ensureFtsDeleteTriggers(Statement statement) throws SQLException {
+        statement.execute("DROP TRIGGER IF EXISTS item_search_ad");
+        statement.execute(
+                "CREATE TRIGGER item_search_ad AFTER DELETE ON item_search BEGIN "
+                        + "INSERT INTO item_fts(item_fts, rowid, material, display, tags, enchantments, lore) "
+                        + "VALUES('delete', old.item_id, old.material, old.display, old.tags, old.enchantments, old.lore); "
+                        + "END");
+        statement.execute("DROP TRIGGER IF EXISTS item_search_au");
+        statement.execute(
+                "CREATE TRIGGER item_search_au AFTER UPDATE ON item_search BEGIN "
+                        + "INSERT INTO item_fts(item_fts, rowid, material, display, tags, enchantments, lore) "
+                        + "VALUES('delete', old.item_id, old.material, old.display, old.tags, old.enchantments, old.lore); "
+                        + "INSERT INTO item_fts(rowid, material, display, tags, enchantments, lore) "
+                        + "VALUES (new.item_id, new.material, new.display, new.tags, new.enchantments, new.lore); "
+                        + "END");
     }
 
     private void applyMigration(Statement statement, String migration) throws SQLException {
@@ -301,7 +320,12 @@ public final class SqliteIndexRepository implements IndexRepository {
                 deleteItems.executeUpdate();
             }
             try (PreparedStatement insertItem = connection.prepareStatement(
-                    "INSERT INTO items (container_id, path, amount, descriptor, provider_id, provider_version, vector, vector_norm) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                    "INSERT INTO items (container_id, path, amount, descriptor, provider_id, provider_version, vector, vector_norm) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    Statement.RETURN_GENERATED_KEYS);
+                 PreparedStatement insertSearch = connection.prepareStatement(
+                    "INSERT INTO item_search (item_id, material, display, tags, enchantments, lore) "
+                            + "VALUES (?, ?, ?, ?, ?, ?)")) {
                 for (IndexedItem item : snapshot.items()) {
                     Embedding embedding = item.embedding();
                     insertItem.setInt(1, containerId);
@@ -312,9 +336,24 @@ public final class SqliteIndexRepository implements IndexRepository {
                     insertItem.setInt(6, embedding.providerVersion());
                     insertItem.setBytes(7, embedding.encode());
                     insertItem.setDouble(8, embedding.norm());
-                    insertItem.addBatch();
+                    insertItem.executeUpdate();
+                    long itemId;
+                    try (ResultSet keys = insertItem.getGeneratedKeys()) {
+                        if (keys.next()) {
+                            itemId = keys.getLong(1);
+                        } else {
+                            throw new SQLException("Failed to retrieve generated item id");
+                        }
+                    }
+                    ItemSearchDocument document = ItemSearchProjector.project(item.descriptor());
+                    insertSearch.setLong(1, itemId);
+                    insertSearch.setString(2, document.material());
+                    insertSearch.setString(3, document.display());
+                    insertSearch.setString(4, document.tags());
+                    insertSearch.setString(5, document.enchantments());
+                    insertSearch.setString(6, document.lore());
+                    insertSearch.executeUpdate();
                 }
-                insertItem.executeBatch();
             }
             connection.commit();
         } catch (RuntimeException | SQLException ex) {
@@ -338,14 +377,122 @@ public final class SqliteIndexRepository implements IndexRepository {
 
     @Override
     public void deleteRoot(BlockKey key) throws SQLException {
-        connection.setAutoCommit(true);
-        try (PreparedStatement deleteContainer = connection.prepareStatement(
-                "DELETE FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
-            deleteContainer.setString(1, key.worldId().toString());
-            deleteContainer.setInt(2, key.x());
-            deleteContainer.setInt(3, key.y());
-            deleteContainer.setInt(4, key.z());
-            deleteContainer.executeUpdate();
+        connection.setAutoCommit(false);
+        Throwable primary = null;
+        try {
+            Integer containerId = null;
+            try (PreparedStatement find = connection.prepareStatement(
+                    "SELECT id FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
+                find.setString(1, key.worldId().toString());
+                find.setInt(2, key.x());
+                find.setInt(3, key.y());
+                find.setInt(4, key.z());
+                try (ResultSet rs = find.executeQuery()) {
+                    if (rs.next()) {
+                        containerId = rs.getInt(1);
+                    }
+                }
+            }
+            if (containerId != null) {
+                }
+            try (PreparedStatement deleteContainer = connection.prepareStatement(
+                    "DELETE FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
+                deleteContainer.setString(1, key.worldId().toString());
+                deleteContainer.setInt(2, key.x());
+                deleteContainer.setInt(3, key.y());
+                deleteContainer.setInt(4, key.z());
+                deleteContainer.executeUpdate();
+            }
+            connection.commit();
+        } catch (RuntimeException | SQLException ex) {
+            primary = ex;
+            try { connection.rollback(); } catch (SQLException r) { ex.addSuppressed(r); }
+            throw ex;
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException restoreEx) {
+                if (primary instanceof SQLException sqlEx) {
+                    sqlEx.addSuppressed(restoreEx);
+                } else if (primary instanceof RuntimeException runtimeEx) {
+                    runtimeEx.addSuppressed(restoreEx);
+                } else if (primary == null) {
+                    throw restoreEx;
+                }
+            }
+        }
+    }
+
+
+
+
+    private static final String FULL_TEXT_MATCH_SQL =
+            "SELECT c.world_uuid, c.x, c.y, c.z, c.block_type, c.fingerprint, c.revision, "
+                    + "i.path, i.amount, i.descriptor, "
+                    + "bm25(item_fts, 10.0, 8.0, 6.0, 5.0, 2.0) AS rank "
+                    + "FROM item_fts "
+                    + "JOIN item_search s ON s.item_id = item_fts.rowid "
+                    + "JOIN items i ON i.id = s.item_id "
+                    + "JOIN containers c ON c.id = i.container_id "
+                    + "JOIN chunks ch ON ch.world_uuid = c.world_uuid "
+                    + "AND ch.chunk_x = c.chunk_x AND ch.chunk_z = c.chunk_z "
+                    + "WHERE item_fts MATCH ? "
+                    + "AND ch.available = 1 "
+                    + "AND c.world_uuid = ? "
+                    + "AND c.chunk_x BETWEEN ? AND ? "
+                    + "AND c.chunk_z BETWEEN ? AND ? "
+                    + "ORDER BY rank ASC, c.x, c.y, c.z, i.path "
+                    + "LIMIT ?";
+
+    @Override
+    public List<FullTextMatch> findFullTextMatches(
+            String matchExpression,
+            UUID worldId,
+            int minChunkX,
+            int maxChunkX,
+            int minChunkZ,
+            int maxChunkZ,
+            int limit
+    ) throws SQLException {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("Full-text limit must be positive");
+        }
+        if (matchExpression == null || matchExpression.isEmpty()) {
+            return List.of();
+        }
+        try (PreparedStatement ps = connection.prepareStatement(FULL_TEXT_MATCH_SQL)) {
+            ps.setString(1, matchExpression);
+            ps.setString(2, worldId.toString());
+            ps.setInt(3, minChunkX);
+            ps.setInt(4, maxChunkX);
+            ps.setInt(5, minChunkZ);
+            ps.setInt(6, maxChunkZ);
+            ps.setInt(7, limit);
+            List<FullTextMatch> matches = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    BlockKey blockKey = new BlockKey(
+                            UUID.fromString(rs.getString(1)),
+                            rs.getInt(2),
+                            rs.getInt(3),
+                            rs.getInt(4)
+                    );
+                    RootIdentity root = new RootIdentity(
+                            blockKey,
+                            rs.getString(5),
+                            rs.getBytes(6),
+                            rs.getLong(7)
+                    );
+                    matches.add(new FullTextMatch(
+                            root,
+                            ItemPathCodec.decode(rs.getBytes(8)),
+                            rs.getInt(9),
+                            DescriptorCodec.decode(rs.getBytes(10)),
+                            rs.getDouble(11)
+                    ));
+                }
+            }
+            return List.copyOf(matches);
         }
     }
 

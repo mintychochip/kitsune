@@ -11,6 +11,7 @@ import dev.jlo.kitsune.model.ItemDescriptor;
 import dev.jlo.kitsune.model.ItemPath;
 import dev.jlo.kitsune.model.ItemPathStep;
 import dev.jlo.kitsune.model.RootIdentity;
+import dev.jlo.kitsune.search.FullTextQuery;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -157,6 +158,77 @@ class SqliteIndexRepositoryTest {
                 ps.setInt(3, chunk.z());
                 ps.executeUpdate();
             }
+        }
+
+
+        ContainerSnapshot snapshotWithMaterial(BlockKey root, String materialKey, ItemPath path) {
+            return snapshotWithMaterial(root, materialKey, path, new SparseTagEmbeddingProvider());
+        }
+
+        ContainerSnapshot snapshotWithMaterial(
+                BlockKey root, String materialKey, ItemPath path, EmbeddingProvider provider) {
+            ItemDescriptor descriptor = ItemDescriptor.builder()
+                    .materialKey(materialKey)
+                    .amount(1)
+                    .build();
+            IndexedItem item = new IndexedItem(path, 1, descriptor, provider.embed(descriptor));
+            return new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3}, List.of(item));
+        }
+
+        ContainerSnapshot snapshotWithDescriptor(BlockKey root, ItemDescriptor descriptor, ItemPath path) {
+            EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+            IndexedItem item = new IndexedItem(path, descriptor.amount(), descriptor, provider.embed(descriptor));
+            return new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3}, List.of(item));
+        }
+
+        ContainerSnapshot snapshotWithItems(BlockKey root, List<IndexedItem> items) {
+            return new ContainerSnapshot(root, "chest", new byte[] {1, 2, 3}, items);
+        }
+
+        void makeChunkAvailable(ChunkKey chunk, boolean available) throws Exception {
+            repository.setChunkAvailable(chunk, available, 1);
+        }
+
+        int containerId(BlockKey root) throws Exception {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT id FROM containers WHERE world_uuid = ? AND x = ? AND y = ? AND z = ?")) {
+                ps.setString(1, root.worldId().toString());
+                ps.setInt(2, root.x());
+                ps.setInt(3, root.y());
+                ps.setInt(4, root.z());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        throw new IllegalStateException("Missing container");
+                    }
+                    return rs.getInt(1);
+                }
+            }
+        }
+
+        int itemSearchCountForContainer(BlockKey root) throws Exception {
+            int containerId = containerId(root);
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM item_search s JOIN items i ON i.id = s.item_id "
+                            + "WHERE i.container_id = ?")) {
+                ps.setInt(1, containerId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    return rs.getInt(1);
+                }
+            }
+        }
+
+        List<IndexRepository.FullTextMatch> findFullText(
+                BlockKey root, String query, int limit) throws Exception {
+            ChunkKey chunk = root.chunkKey();
+            return repository.findFullTextMatches(
+                    FullTextQuery.parse(query).matchExpression(),
+                    root.worldId(),
+                    chunk.x(),
+                    chunk.x(),
+                    chunk.z(),
+                    chunk.z(),
+                    limit);
         }
 
         @Override
@@ -1159,6 +1231,201 @@ class SqliteIndexRepositoryTest {
     }
 
 
+    @Test
+    void findFullTextMatchesReturnsDiamondPickaxe(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-diamond.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            ItemPath path = new ItemPath(List.of(new ItemPathStep("Storage", 0)));
+            fixture.repository().replaceRoot(
+                    fixture.snapshotWithMaterial(root, "minecraft:diamond_pickaxe", path), 1);
+            fixture.makeChunkAvailable(root.chunkKey(), true);
+
+            List<IndexRepository.FullTextMatch> hits = fixture.findFullText(root, "diam", 10);
+            assertEquals(1, hits.size());
+            assertEquals(path, hits.getFirst().path());
+            assertEquals("minecraft:diamond_pickaxe", hits.getFirst().descriptor().materialKey());
+        }
+    }
+
+    @Test
+    void replaceRootRemovesPreviousFullTextHit(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-replace.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            fixture.insertAvailable(root, "minecraft:diamond_pickaxe");
+            assertEquals(1, fixture.findFullText(root, "diam", 10).size());
+
+            fixture.repository().replaceRoot(fixture.snapshot(root, "minecraft:oak_planks"), 2);
+            assertTrue(fixture.findFullText(root, "diam", 10).isEmpty());
+            assertEquals(1, fixture.findFullText(root, "oak", 10).size());
+        }
+    }
+
+    @Test
+    void deleteRootClearsFullTextRows(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-delete.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            fixture.insertAvailable(root, "minecraft:diamond_pickaxe");
+            int containerId = fixture.containerId(root);
+            assertEquals(1, fixture.itemSearchCountForContainer(root));
+
+            fixture.repository().deleteRoot(root);
+            assertEquals(0, itemSearchCountForContainer(fixture.connection(), containerId));
+            assertTrue(fixture.findFullText(root, "diam", 10).isEmpty());
+        }
+    }
+
+    @Test
+    void findFullTextMatchesSurvivesReopen(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("fts-reopen.db");
+        BlockKey root;
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(database)) {
+            root = fixture.key(0, 64, 0);
+            fixture.insertAvailable(root, "minecraft:diamond_pickaxe");
+            assertEquals(1, fixture.findFullText(root, "diam", 10).size());
+        }
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(database)) {
+            assertEquals(1, fixture.findFullText(root, "diam", 10).size());
+        }
+    }
+
+    @Test
+    void findFullTextMatchesRespectsWorldAndChunkBounds(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-bounds.db"))) {
+            UUID worldId = UUID.randomUUID();
+            BlockKey inside = new BlockKey(worldId, 0, 64, 0);
+            BlockKey otherWorld = new BlockKey(UUID.randomUUID(), 0, 64, 0);
+            BlockKey farChunk = new BlockKey(worldId, 256, 64, 0);
+
+            fixture.insertAvailable(inside, "minecraft:diamond_pickaxe");
+            fixture.insertAvailable(otherWorld, "minecraft:diamond_pickaxe");
+            fixture.insertAvailable(farChunk, "minecraft:diamond_pickaxe");
+
+            ChunkKey insideChunk = inside.chunkKey();
+            List<IndexRepository.FullTextMatch> hits = fixture.repository().findFullTextMatches(
+                    FullTextQuery.parse("diam").matchExpression(),
+                    worldId,
+                    insideChunk.x(),
+                    insideChunk.x(),
+                    insideChunk.z(),
+                    insideChunk.z(),
+                    10);
+            assertEquals(1, hits.size());
+            assertEquals(inside, hits.getFirst().root().key());
+        }
+    }
+
+    @Test
+    void findFullTextMatchesExcludesUnavailableChunk(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-unavailable.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            fixture.repository().replaceRoot(fixture.snapshot(root, "minecraft:diamond_pickaxe"), 1);
+            fixture.makeChunkAvailable(root.chunkKey(), false);
+
+            assertTrue(fixture.findFullText(root, "diam", 10).isEmpty());
+        }
+    }
+
+    @Test
+    void findFullTextMatchesHonorsLimitAndBm25Order(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-limit.db"))) {
+            UUID worldId = UUID.randomUUID();
+            EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+            List<IndexedItem> items = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                ItemDescriptor descriptor = ItemDescriptor.builder()
+                        .materialKey("minecraft:oak_planks")
+                        .amount(1)
+                        .addDisplayText("wood plank " + i)
+                        .build();
+                items.add(new IndexedItem(
+                        new ItemPath(List.of(new ItemPathStep("Storage", i))),
+                        1,
+                        descriptor,
+                        provider.embed(descriptor)));
+            }
+            BlockKey root = new BlockKey(worldId, 0, 64, 0);
+            fixture.repository().replaceRoot(fixture.snapshotWithItems(root, items), 1);
+            fixture.makeChunkAvailable(root.chunkKey(), true);
+
+            ChunkKey chunk = root.chunkKey();
+            List<IndexRepository.FullTextMatch> hits = fixture.repository().findFullTextMatches(
+                    FullTextQuery.parse("wood").matchExpression(),
+                    worldId,
+                    chunk.x(),
+                    chunk.x(),
+                    chunk.z(),
+                    chunk.z(),
+                    3);
+            assertEquals(3, hits.size());
+            for (int i = 1; i < hits.size(); i++) {
+                assertTrue(hits.get(i - 1).bm25() <= hits.get(i).bm25());
+            }
+        }
+    }
+
+    @Test
+    void findFullTextMatchesTreatsRawOperatorsAsLiterals(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-literal.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            ItemDescriptor descriptor = ItemDescriptor.builder()
+                    .materialKey("minecraft:stone")
+                    .amount(1)
+                    .addDisplayText("foo AND bar")
+                    .build();
+            ItemPath path = new ItemPath(List.of(new ItemPathStep("Storage", 0)));
+            fixture.repository().replaceRoot(fixture.snapshotWithDescriptor(root, descriptor, path), 1);
+            fixture.makeChunkAvailable(root.chunkKey(), true);
+
+            String expression = FullTextQuery.parse("foo AND bar").matchExpression();
+            ChunkKey chunk = root.chunkKey();
+            List<IndexRepository.FullTextMatch> hits = fixture.repository().findFullTextMatches(
+                    expression,
+                    root.worldId(),
+                    chunk.x(),
+                    chunk.x(),
+                    chunk.z(),
+                    chunk.z(),
+                    10);
+            assertEquals(1, hits.size());
+            assertEquals(path, hits.getFirst().path());
+        }
+    }
+
+    @Test
+    void findFullTextMatchesRejectsNonPositiveLimit(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-limit-invalid.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            ChunkKey chunk = root.chunkKey();
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> fixture.repository().findFullTextMatches(
+                            FullTextQuery.parse("diam").matchExpression(),
+                            root.worldId(),
+                            chunk.x(),
+                            chunk.x(),
+                            chunk.z(),
+                            chunk.z(),
+                            0));
+        }
+    }
+
+    @Test
+    void findFullTextMatchesReturnsEmptyForBlankExpression(@TempDir Path tempDir) throws Exception {
+        try (RepositoryTestFixture fixture = new RepositoryTestFixture(tempDir.resolve("fts-blank.db"))) {
+            BlockKey root = fixture.key(0, 64, 0);
+            ChunkKey chunk = root.chunkKey();
+            assertTrue(fixture.repository().findFullTextMatches(
+                    "",
+                    root.worldId(),
+                    chunk.x(),
+                    chunk.x(),
+                    chunk.z(),
+                    chunk.z(),
+                    10).isEmpty());
+        }
+    }
+
+
     private static List<String> v2Statements() throws Exception {
         try (var input = SqliteIndexRepository.class.getClassLoader()
                 .getResourceAsStream("db/migration/V2__embeddings_cache.sql")) {
@@ -1215,6 +1482,18 @@ class SqliteIndexRepositoryTest {
                 }
             }
             return statements;
+        }
+    }
+
+    private static int itemSearchCountForContainer(Connection connection, int containerId) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT COUNT(*) FROM item_search s JOIN items i ON i.id = s.item_id "
+                        + "WHERE i.container_id = ?")) {
+            ps.setInt(1, containerId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
         }
     }
 
