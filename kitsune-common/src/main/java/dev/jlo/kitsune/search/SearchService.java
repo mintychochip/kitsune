@@ -9,6 +9,7 @@ import dev.jlo.kitsune.index.IndexWorker;
 import dev.jlo.kitsune.model.BlockKey;
 import dev.jlo.kitsune.model.ChunkKey;
 import dev.jlo.kitsune.model.IndexedItem;
+import dev.jlo.kitsune.model.ItemDescriptor;
 import dev.jlo.kitsune.model.ItemPath;
 import dev.jlo.kitsune.model.ItemPathStep;
 import dev.jlo.kitsune.model.RootIdentity;
@@ -17,6 +18,7 @@ import dev.jlo.kitsune.session.SearchToken;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,6 +46,13 @@ public final class SearchService {
         .thenComparing(ItemMatch::path, SearchService::comparePaths)
         .thenComparingInt(ItemMatch::amount)
         .thenComparing(match -> match.descriptor().materialKey());
+
+    private static final Comparator<SemanticHit> SEMANTIC_HIT_COMPARATOR = Comparator
+        .comparingDouble(SemanticHit::cosine)
+        .reversed()
+        .thenComparing(hit -> hit.item().path(), SearchService::comparePaths)
+        .thenComparingInt(hit -> hit.item().amount())
+        .thenComparing(hit -> hit.item().descriptor().materialKey());
 
     private final IndexReadiness readiness;
     private final IndexWorker worker;
@@ -92,6 +101,11 @@ public final class SearchService {
             return CompletableFuture.completedFuture(SearchOutcome.failure());
         }
 
+        FullTextQuery fullTextQuery = FullTextQuery.parse(request.query());
+        if (fullTextQuery.isEmpty()) {
+            return CompletableFuture.completedFuture(SearchOutcome.unsupportedQuery());
+        }
+
         CompletableFuture<SearchOutcome> pipeline = embedQuery(context, request, token, guard)
             .thenCompose(queryEmbedding -> loadedChunks(context, token, guard)
                 .thenCompose(chunks -> {
@@ -100,18 +114,37 @@ public final class SearchService {
                         return CompletableFuture.completedFuture(SearchOutcome.noMatches());
                     }
                     return awaitReady(context, token, guard, chunks)
-                        .thenCompose(ignored -> collectCandidatePages(
+                        .thenCompose(ignored -> runHybridSearch(
                             context,
                             token,
                             guard,
                             queryEmbedding,
-                            candidateBounds(context),
-                            null,
-                            new RankAccumulator()
+                            fullTextQuery
                         ));
                 }));
 
         return pipeline.handle((outcome, failure) -> mapOutcome(context, token, guard, outcome, failure));
+    }
+
+    private CompletableFuture<SearchOutcome> runHybridSearch(
+        SearchContext context,
+        SearchToken token,
+        SearchGuard guard,
+        Embedding queryEmbedding,
+        FullTextQuery fullTextQuery
+    ) {
+        CandidateBounds bounds = candidateBounds(context);
+        return findFullTextMatches(context, token, guard, fullTextQuery, bounds)
+            .thenCompose(ftsMatches -> filterValidatedFtsMatches(context, token, guard, ftsMatches)
+                .thenCompose(filteredFts -> collectCandidatePages(
+                    context,
+                    token,
+                    guard,
+                    queryEmbedding,
+                    bounds,
+                    null,
+                    new HybridAccumulator(filteredFts.matches(), filteredFts.allowedRoots())
+                )));
     }
 
     private CompletableFuture<Embedding> embedQuery(
@@ -191,6 +224,67 @@ public final class SearchService {
         return stage.toCompletableFuture().thenRun(() -> requireCurrent(context, token, guard));
     }
 
+    private CompletableFuture<List<IndexRepository.FullTextMatch>> findFullTextMatches(
+        SearchContext context,
+        SearchToken token,
+        SearchGuard guard,
+        FullTextQuery fullTextQuery,
+        CandidateBounds bounds
+    ) {
+        return worker.submit(() -> {
+            requireCurrent(context, token, guard);
+            List<IndexRepository.FullTextMatch> matches = repository.findFullTextMatches(
+                fullTextQuery.matchExpression(),
+                bounds.worldId(),
+                bounds.minChunkX(),
+                bounds.maxChunkX(),
+                bounds.minChunkZ(),
+                bounds.maxChunkZ(),
+                policy.fullTextLimit()
+            );
+            requireCurrent(context, token, guard);
+            return Objects.requireNonNull(matches, "Full-text matches must not be null");
+        }).thenApply(matches -> {
+            requireCurrent(context, token, guard);
+            return matches;
+        });
+    }
+
+    private CompletableFuture<FilteredFts> filterValidatedFtsMatches(
+        SearchContext context,
+        SearchToken token,
+        SearchGuard guard,
+        List<IndexRepository.FullTextMatch> ftsMatches
+    ) {
+        if (ftsMatches.isEmpty()) {
+            return CompletableFuture.completedFuture(new FilteredFts(List.of(), Map.of()));
+        }
+
+        List<RootIdentity> roots = new ArrayList<>();
+        Set<BlockKey> seen = new LinkedHashSet<>();
+        for (IndexRepository.FullTextMatch match : ftsMatches) {
+            BlockKey key = match.root().key();
+            if (!seen.contains(key)) {
+                seen.add(key);
+                roots.add(match.root());
+            }
+        }
+
+        return validateCandidates(context, token, guard, roots)
+            .thenApply(allowedRoots -> {
+                List<IndexRepository.FullTextMatch> filtered = new ArrayList<>();
+                for (IndexRepository.FullTextMatch match : ftsMatches) {
+                    if (allowedRoots.containsKey(match.root().key())) {
+                        filtered.add(match);
+                    }
+                }
+                if (filtered.size() > policy.fullTextLimit()) {
+                    filtered = filtered.subList(0, policy.fullTextLimit());
+                }
+                return new FilteredFts(List.copyOf(filtered), allowedRoots);
+            });
+    }
+
     private CompletableFuture<IndexRepository.CandidatePage> findCandidates(
         SearchContext context,
         SearchToken token,
@@ -224,7 +318,7 @@ public final class SearchService {
         Embedding queryEmbedding,
         CandidateBounds bounds,
         IndexRepository.CandidateCursor after,
-        RankAccumulator accumulator
+        HybridAccumulator accumulator
     ) {
         return findCandidates(context, token, guard, bounds, after)
             .thenCompose(page -> {
@@ -254,15 +348,15 @@ public final class SearchService {
                                 accumulator
                             );
                         }
-                        return loadAndRank(
+                        return loadAndCollectSemantic(
                             context,
                             token,
                             guard,
                             queryEmbedding,
                             allowedRoots
-                        ).thenCompose(rankedPage -> {
+                        ).thenCompose(semanticHits -> {
                             requireCurrent(context, token, guard);
-                            accumulator.add(rankedPage);
+                            accumulator.addSemanticHits(semanticHits);
                             return continueCandidatePages(
                                 context,
                                 token,
@@ -284,7 +378,7 @@ public final class SearchService {
         Embedding queryEmbedding,
         CandidateBounds bounds,
         IndexRepository.CandidateCursor next,
-        RankAccumulator accumulator
+        HybridAccumulator accumulator
     ) {
         if (next == null) {
             return CompletableFuture.completedFuture(accumulator.finish());
@@ -350,7 +444,7 @@ public final class SearchService {
         });
     }
 
-    private CompletableFuture<RankedPage> loadAndRank(
+    private CompletableFuture<List<SemanticHit>> loadAndCollectSemantic(
         SearchContext context,
         SearchToken token,
         SearchGuard guard,
@@ -365,34 +459,30 @@ public final class SearchService {
                 embeddings
             );
             requireCurrent(context, token, guard);
-            RankedPage page = rankPage(
+            List<SemanticHit> hits = collectSemanticHits(
                 Objects.requireNonNull(documents, "Documents must not be null"),
                 queryEmbedding,
                 allowedRoots
             );
             requireCurrent(context, token, guard);
-            return page;
-        }).thenApply(page -> {
+            return hits;
+        }).thenApply(hits -> {
             requireCurrent(context, token, guard);
-            return page;
+            return hits;
         });
     }
 
-    private RankedPage rankPage(
+    private List<SemanticHit> collectSemanticHits(
         Map<BlockKey, List<IndexedItem>> documents,
         Embedding queryEmbedding,
         Map<BlockKey, AllowedRoot> allowedRoots
     ) {
-        List<RootMatch> matchingRoots = new ArrayList<>();
-        int totalMatchingStacks = 0;
-
+        List<SemanticHit> hits = new ArrayList<>();
         for (AllowedRoot allowedRoot : allowedRoots.values()) {
             List<IndexedItem> items = documents.get(allowedRoot.identity().key());
             if (items == null || items.isEmpty()) {
                 continue;
             }
-
-            List<ItemMatch> matchingItems = new ArrayList<>();
             for (IndexedItem item : items) {
                 Objects.requireNonNull(item, "Indexed item must not be null");
                 double score = item.embedding().cosine(queryEmbedding);
@@ -400,40 +490,11 @@ public final class SearchService {
                     throw new IllegalStateException("Embedding provider returned an invalid cosine score");
                 }
                 if (score >= policy.minimumScore()) {
-                    matchingItems.add(new ItemMatch(
-                        item.descriptor(),
-                        item.path(),
-                        score,
-                        item.amount()
-                    ));
+                    hits.add(new SemanticHit(allowedRoot, item, score));
                 }
             }
-            if (matchingItems.isEmpty()) {
-                continue;
-            }
-
-            matchingItems.sort(ITEM_COMPARATOR);
-            int matchingStacksForRoot = matchingItems.size();
-            totalMatchingStacks = Math.addExact(totalMatchingStacks, matchingStacksForRoot);
-            List<ItemMatch> visibleItems = matchingItems.size() <= policy.maxPathsPerRoot()
-                ? List.copyOf(matchingItems)
-                : List.copyOf(matchingItems.subList(0, policy.maxPathsPerRoot()));
-
-            matchingRoots.add(new RootMatch(
-                allowedRoot.identity(),
-                allowedRoot.distance(),
-                matchingItems.getFirst().score(),
-                matchingStacksForRoot,
-                visibleItems
-            ));
         }
-
-        matchingRoots.sort(ROOT_COMPARATOR);
-        return new RankedPage(
-            List.copyOf(matchingRoots),
-            matchingRoots.size(),
-            totalMatchingStacks
-        );
+        return hits;
     }
 
     private SearchOutcome mapOutcome(
@@ -528,33 +589,146 @@ public final class SearchService {
         int maxChunkZ
     ) {}
 
-    private record RankedPage(
-        List<RootMatch> roots,
-        int totalMatchingRoots,
-        int totalMatchingStacks
+    private record FilteredFts(
+        List<IndexRepository.FullTextMatch> matches,
+        Map<BlockKey, AllowedRoot> allowedRoots
     ) {}
 
-    private final class RankAccumulator {
-        private final List<RootMatch> visibleRoots = new ArrayList<>();
-        private int totalMatchingRoots;
-        private int totalMatchingStacks;
+    private record SemanticHit(AllowedRoot allowedRoot, IndexedItem item, double cosine) {}
 
-        void add(RankedPage page) {
-            totalMatchingRoots = Math.addExact(totalMatchingRoots, page.totalMatchingRoots());
-            totalMatchingStacks = Math.addExact(totalMatchingStacks, page.totalMatchingStacks());
-            visibleRoots.addAll(page.roots());
-            visibleRoots.sort(ROOT_COMPARATOR);
-            if (visibleRoots.size() > policy.maxResults()) {
-                visibleRoots.subList(policy.maxResults(), visibleRoots.size()).clear();
-            }
+    private record FusionKey(BlockKey rootKey, ItemPath path) {
+        static FusionKey of(BlockKey rootKey, ItemPath path) {
+            return new FusionKey(rootKey, path);
+        }
+    }
+
+    private final class HybridAccumulator {
+        private final List<IndexRepository.FullTextMatch> ftsMatches;
+        private final Map<BlockKey, AllowedRoot> ftsAllowedRoots;
+        private final List<SemanticHit> semanticHits = new ArrayList<>();
+
+        HybridAccumulator(
+            List<IndexRepository.FullTextMatch> ftsMatches,
+            Map<BlockKey, AllowedRoot> ftsAllowedRoots
+        ) {
+            this.ftsMatches = List.copyOf(ftsMatches);
+            this.ftsAllowedRoots = Map.copyOf(ftsAllowedRoots);
+        }
+
+        void addSemanticHits(List<SemanticHit> hits) {
+            semanticHits.addAll(hits);
         }
 
         SearchOutcome finish() {
-            if (totalMatchingRoots == 0) {
+            List<SemanticHit> rankedSemantic = new ArrayList<>(semanticHits);
+            rankedSemantic.sort(SEMANTIC_HIT_COMPARATOR);
+            if (rankedSemantic.size() > policy.semanticLimit()) {
+                rankedSemantic = rankedSemantic.subList(0, policy.semanticLimit());
+            }
+
+            Map<FusionKey, Integer> ftsRankByKey = new LinkedHashMap<>();
+            Map<FusionKey, IndexRepository.FullTextMatch> ftsByKey = new LinkedHashMap<>();
+            int ftsRank = 1;
+            for (IndexRepository.FullTextMatch match : ftsMatches) {
+                FusionKey key = FusionKey.of(match.root().key(), match.path());
+                if (!ftsRankByKey.containsKey(key)) {
+                    ftsRankByKey.put(key, ftsRank++);
+                    ftsByKey.put(key, match);
+                }
+            }
+
+            Map<FusionKey, Integer> semanticRankByKey = new LinkedHashMap<>();
+            Map<FusionKey, SemanticHit> semanticByKey = new LinkedHashMap<>();
+            int semanticRank = 1;
+            for (SemanticHit hit : rankedSemantic) {
+                FusionKey key = FusionKey.of(hit.allowedRoot().identity().key(), hit.item().path());
+                if (!semanticRankByKey.containsKey(key)) {
+                    semanticRankByKey.put(key, semanticRank++);
+                    semanticByKey.put(key, hit);
+                }
+            }
+
+            Set<FusionKey> union = new LinkedHashSet<>();
+            union.addAll(ftsRankByKey.keySet());
+            union.addAll(semanticRankByKey.keySet());
+            if (union.isEmpty()) {
                 return SearchOutcome.noMatches();
             }
+
+            Map<BlockKey, List<ItemMatch>> itemsByRoot = new LinkedHashMap<>();
+            Map<BlockKey, AllowedRoot> allowedByRoot = new LinkedHashMap<>();
+
+            for (FusionKey key : union) {
+                Integer ftsItemRank = ftsRankByKey.get(key);
+                Integer semanticItemRank = semanticRankByKey.get(key);
+                double displayScore = ReciprocalRankFusion.displayScore(
+                    policy.rrfK(),
+                    ftsItemRank,
+                    semanticItemRank
+                );
+
+                SemanticHit semantic = semanticByKey.get(key);
+                IndexRepository.FullTextMatch fts = ftsByKey.get(key);
+                AllowedRoot allowedRoot;
+                ItemDescriptor descriptor;
+                ItemPath path;
+                int amount;
+                if (semantic != null) {
+                    allowedRoot = semantic.allowedRoot();
+                    descriptor = semantic.item().descriptor();
+                    path = semantic.item().path();
+                    amount = semantic.item().amount();
+                } else {
+                    allowedRoot = ftsAllowedRoots.get(key.rootKey());
+                    if (allowedRoot == null) {
+                        continue;
+                    }
+                    descriptor = fts.descriptor();
+                    path = fts.path();
+                    amount = fts.amount();
+                }
+
+                itemsByRoot.computeIfAbsent(key.rootKey(), ignored -> new ArrayList<>())
+                    .add(new ItemMatch(descriptor, path, displayScore, amount));
+                allowedByRoot.putIfAbsent(key.rootKey(), allowedRoot);
+            }
+
+            if (itemsByRoot.isEmpty()) {
+                return SearchOutcome.noMatches();
+            }
+
+            List<RootMatch> matchingRoots = new ArrayList<>();
+            int totalMatchingStacks = 0;
+            for (Map.Entry<BlockKey, List<ItemMatch>> entry : itemsByRoot.entrySet()) {
+                AllowedRoot allowedRoot = allowedByRoot.get(entry.getKey());
+                if (allowedRoot == null) {
+                    continue;
+                }
+                List<ItemMatch> fusedItems = entry.getValue();
+                fusedItems.sort(ITEM_COMPARATOR);
+                int matchingStacksForRoot = fusedItems.size();
+                totalMatchingStacks = Math.addExact(totalMatchingStacks, matchingStacksForRoot);
+                List<ItemMatch> visibleItems = fusedItems.size() <= policy.maxPathsPerRoot()
+                    ? List.copyOf(fusedItems)
+                    : List.copyOf(fusedItems.subList(0, policy.maxPathsPerRoot()));
+
+                matchingRoots.add(new RootMatch(
+                    allowedRoot.identity(),
+                    allowedRoot.distance(),
+                    fusedItems.getFirst().score(),
+                    matchingStacksForRoot,
+                    visibleItems
+                ));
+            }
+
+            matchingRoots.sort(ROOT_COMPARATOR);
+            int totalMatchingRoots = matchingRoots.size();
+            List<RootMatch> visibleRoots = matchingRoots.size() <= policy.maxResults()
+                ? List.copyOf(matchingRoots)
+                : List.copyOf(matchingRoots.subList(0, policy.maxResults()));
+
             return SearchOutcome.success(
-                List.copyOf(visibleRoots),
+                visibleRoots,
                 totalMatchingRoots,
                 totalMatchingStacks
             );

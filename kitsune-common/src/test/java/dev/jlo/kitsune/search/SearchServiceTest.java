@@ -97,7 +97,7 @@ class SearchServiceTest {
             assertEquals(1, matched.itemMatches().size());
             assertNotEquals(denied.identity().key(), matched.key());
             assertEquals("allowed", matched.itemMatches().get(0).path().steps().getFirst().label());
-            assertEquals(0.99, matched.bestScore());
+            assertEquals(0.5, matched.bestScore());
             assertEquals(Set.of(allowed.identity().key()), harness.loadedDocumentKeys());
         }
     }
@@ -162,7 +162,7 @@ class SearchServiceTest {
 
     @Test
     void candidatePagesKeepGlobalCountsAndBestRoot() throws Exception {
-        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1), 60, 64, 64);
+        SearchPolicy policy = new SearchPolicy(32, 0.75, 1, 4, Duration.ofSeconds(1), 60, 64, 256);
         List<RootSeed> roots = new ArrayList<>();
         for (int index = 0; index < 129; index++) {
             double score = index == 128 ? 0.99 : 0.80;
@@ -203,9 +203,9 @@ class SearchServiceTest {
             assertEquals(3, root.totalMatchingStacks());
             assertEquals(2, root.itemMatches().size());
             assertEquals(packed.identity().key(), root.key());
-            assertEquals(0.95, root.bestScore());
-            assertEquals(0.95, root.itemMatches().get(0).score());
-            assertEquals(0.84, root.itemMatches().get(1).score());
+            assertEquals(0.5, root.bestScore());
+            assertEquals(0.5, root.itemMatches().get(0).score());
+            assertEquals(ReciprocalRankFusion.displayScore(60, null, 2), root.itemMatches().get(1).score());
         }
     }
 
@@ -236,6 +236,7 @@ class SearchServiceTest {
             assertEquals(Set.of(), harness.loadedDocumentKeys());
             assertEquals(0, harness.loadDocumentCalls());
             assertEquals(0, harness.findCandidateCalls());
+            assertEquals(0, harness.findFullTextMatchCalls());
         }
     }
 
@@ -324,6 +325,77 @@ class SearchServiceTest {
         }
     }
 
+
+    @Test
+    void ftsOnlyHitAppearsWhenCosineBelowMinimum() throws Exception {
+        SearchPolicy policy = new SearchPolicy(16, 0.80, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
+        RootSeed packed = seedRoot(1, 64, 0, false, false, ftsMatch("fts-only", 0.1, 0));
+
+        try (SearchHarness harness = SearchHarness.create(policy, packed)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(1, outcome.totalAccessibleMatchingRoots());
+            assertEquals(packed.identity().key(), outcome.roots().getFirst().key());
+        }
+    }
+
+    @Test
+    void cosineOnlyHitAppearsWhenNotInFtsList() throws Exception {
+        RootSeed packed = seedRoot(2, 64, 0, false, false, scoreMatch("cosine-only", 0.95, 0));
+
+        try (SearchHarness harness = SearchHarness.create(defaultPolicy(), packed)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            RootMatch root = outcome.roots().getFirst();
+            assertEquals(packed.identity().key(), root.key());
+            assertEquals(0.5, root.bestScore());
+        }
+    }
+
+    @Test
+    void bothListsBeatOneList() throws Exception {
+        RootSeed bothLists = seedRoot(-1, 64, 0, false, false, ftsMatch("both", 0.95, 0));
+        RootSeed ftsOnly = seedRoot(1, 64, 0, false, false, ftsMatch("fts-only", 0.1, 0));
+        RootSeed semanticOnly = seedRoot(0, 64, 1, false, false, scoreMatch("semantic-only", 0.95, 0));
+        SearchPolicy policy = new SearchPolicy(16, 0.80, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
+
+        try (SearchHarness harness = SearchHarness.create(policy, bothLists, ftsOnly, semanticOnly)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(bothLists.identity().key(), outcome.roots().getFirst().key());
+        }
+    }
+
+    @Test
+    void deniedFtsRootNeverLoadsOrRenders() throws Exception {
+        RootSeed allowed = seedRoot(1, 64, 0, false, false, scoreMatch("allowed", 0.90, 0));
+        RootSeed denied = seedRoot(2, 64, 0, true, false, ftsMatch("denied-fts", 0.99, 0));
+
+        try (SearchHarness harness = SearchHarness.create(defaultPolicy(), allowed, denied)) {
+            SearchOutcome outcome = harness.search("diamond");
+
+            assertEquals(SearchOutcome.Status.SUCCESS, outcome.status());
+            assertEquals(1, outcome.roots().size());
+            assertEquals(allowed.identity().key(), outcome.roots().getFirst().key());
+            assertEquals(Set.of(allowed.identity().key()), harness.loadedDocumentKeys());
+        }
+    }
+
+    @Test
+    void emptyQueryIsUnsupportedWithoutRepositoryCalls() throws Exception {
+        try (SearchHarness harness = SearchHarness.create(defaultPolicy())) {
+            SearchOutcome outcome = harness.search("!!!");
+
+            assertEquals(SearchOutcome.Status.UNSUPPORTED_QUERY, outcome.status());
+            assertEquals(0, harness.findFullTextMatchCalls());
+            assertEquals(0, harness.loadDocumentCalls());
+            assertEquals(0, harness.findCandidateCalls());
+        }
+    }
+
     private static SearchPolicy defaultPolicy() {
         return new SearchPolicy(16, 0.75, 10, 4, Duration.ofSeconds(1), 60, 64, 64);
     }
@@ -346,7 +418,11 @@ class SearchServiceTest {
     }
 
     private static ScoreMatch scoreMatch(String path, double score, int slot) {
-        return new ScoreMatch(path, score, slot, 1);
+        return new ScoreMatch(path, score, slot, 1, false);
+    }
+
+    private static ScoreMatch ftsMatch(String path, double score, int slot) {
+        return new ScoreMatch(path, score, slot, 1, true);
     }
 
     private record SearchHarness(
@@ -475,6 +551,10 @@ class SearchServiceTest {
 
         int loadDocumentCalls() {
             return repository.loadDocumentCalls();
+        }
+
+        int findFullTextMatchCalls() {
+            return repository.findFullTextMatchCalls();
         }
 
         List<Integer> validationBatchSizes() {
@@ -638,6 +718,7 @@ class SearchServiceTest {
         private volatile boolean emptyFirstPage;
         private volatile int findCalls;
         private volatile int loadCalls;
+        private volatile int findFtsCalls;
         FakeIndexRepository(List<RootSeed> roots, DeterministicEmbeddingProvider embeddings) {
             this.embeddings = embeddings;
             this.candidates = roots.stream()
@@ -655,7 +736,8 @@ class SearchServiceTest {
                         match.amount(),
                         new ItemPath(List.of(new ItemPathStep(match.path(), match.slot()))),
                         match.slot(),
-                        match.score()
+                        match.score(),
+                        match.fullTextHit()
                     ))
                     .toList();
                 itemsByRoot.put(seed.identity().key(), stored);
@@ -672,6 +754,10 @@ class SearchServiceTest {
 
         int loadDocumentCalls() {
             return loadCalls;
+        }
+
+        int findFullTextMatchCalls() {
+            return findFtsCalls;
         }
 
         List<Integer> candidatePageSizes() {
@@ -817,7 +903,32 @@ class SearchServiceTest {
                 int maxChunkZ,
                 int limit
         ) {
-            return List.of();
+            findFtsCalls += 1;
+            if (matchExpression.isEmpty()) {
+                return List.of();
+            }
+            List<IndexRepository.FullTextMatch> matches = new ArrayList<>();
+            int index = 0;
+            for (RootIdentity root : candidates) {
+                List<CandidateItem> seeded = itemsByRoot.getOrDefault(root.key(), List.of());
+                for (CandidateItem item : seeded) {
+                    if (!item.fullTextHit()) {
+                        continue;
+                    }
+                    matches.add(new IndexRepository.FullTextMatch(
+                        root,
+                        item.path(),
+                        item.amount(),
+                        item.descriptor(),
+                        -index
+                    ));
+                    index += 1;
+                    if (matches.size() >= limit) {
+                        return List.copyOf(matches);
+                    }
+                }
+            }
+            return List.copyOf(matches);
         }
 
         @Override
@@ -967,10 +1078,11 @@ class SearchServiceTest {
     }
 
     private static final record CandidateItem(ItemDescriptor descriptor,
-                                            int amount,
-                                            ItemPath path,
-                                            int slot,
-                                            double score) {
+                                              int amount,
+                                              ItemPath path,
+                                              int slot,
+                                              double score,
+                                              boolean fullTextHit) {
     }
 
     private static final record RootSeed(RootIdentity identity, boolean denied, boolean stale, List<ScoreMatch> matches) {
@@ -982,6 +1094,12 @@ class SearchServiceTest {
         }
     }
 
-    private static final record ScoreMatch(String path, double score, int slot, int amount) {
+    private static final record ScoreMatch(
+        String path,
+        double score,
+        int slot,
+        int amount,
+        boolean fullTextHit
+    ) {
     }
 }
