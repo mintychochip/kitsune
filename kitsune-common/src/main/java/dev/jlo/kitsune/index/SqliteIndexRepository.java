@@ -124,27 +124,28 @@ public final class SqliteIndexRepository implements IndexRepository {
         Throwable primary = null;
         try {
             Integer current = currentSchemaVersion();
-            if (current != null && current == 2) {
+            if (current != null && current == 3) {
                 return;
             }
-            if (current != null && current != 1) {
+            if (current != null && current != 1 && current != 2) {
                 throw new SQLException("Unsupported schema version: " + current);
             }
             connection.setAutoCommit(false);
             try (Statement statement = connection.createStatement()) {
                 if (current == null) {
-                    for (String sql : splitStatements(readMigration("V1__initial.sql"))) {
-                        statement.execute(sql);
-                    }
+                    applyMigration(statement, "V1__initial.sql");
                 }
-                for (String sql : splitStatements(readMigration("V2__embeddings_cache.sql"))) {
-                    statement.execute(sql);
+                if (current == null || current == 1) {
+                    applyMigration(statement, "V2__embeddings_cache.sql");
                 }
+                applyMigration(statement, "V3__item_fts.sql");
+                backfillItemSearch();
+                verifyItemSearchCounts();
                 try (PreparedStatement ps = connection.prepareStatement(
                         "INSERT INTO schema_metadata (key, value) VALUES (?, ?) "
                                 + "ON CONFLICT(key) DO UPDATE SET value = excluded.value")) {
                     ps.setString(1, "schema_version");
-                    ps.setString(2, "2");
+                    ps.setString(2, "3");
                     ps.executeUpdate();
                 }
                 connection.commit();
@@ -168,6 +169,45 @@ public final class SqliteIndexRepository implements IndexRepository {
                 } else if (primary == null) {
                     throw restoreEx;
                 }
+            }
+        }
+    }
+
+    private void applyMigration(Statement statement, String migration) throws SQLException {
+        for (String sql : splitStatements(readMigration(migration))) {
+            statement.execute(sql);
+        }
+    }
+
+    private void backfillItemSearch() throws SQLException {
+        try (PreparedStatement select = connection.prepareStatement(
+                "SELECT id, descriptor FROM items");
+             ResultSet rs = select.executeQuery();
+             PreparedStatement insert = connection.prepareStatement(
+                "INSERT INTO item_search (item_id, material, display, tags, enchantments, lore) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)")) {
+            while (rs.next()) {
+                ItemSearchDocument document = ItemSearchProjector.project(
+                        DescriptorCodec.decode(rs.getBytes(2)));
+                insert.setLong(1, rs.getLong(1));
+                insert.setString(2, document.material());
+                insert.setString(3, document.display());
+                insert.setString(4, document.tags());
+                insert.setString(5, document.enchantments());
+                insert.setString(6, document.lore());
+                insert.addBatch();
+            }
+            insert.executeBatch();
+        }
+    }
+
+    private void verifyItemSearchCounts() throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT (SELECT COUNT(*) FROM items) AS items, "
+                             + "(SELECT COUNT(*) FROM item_search) AS search")) {
+            if (!rs.next() || rs.getInt("items") != rs.getInt("search")) {
+                throw new SQLException("Item search backfill count mismatch");
             }
         }
     }
@@ -731,16 +771,50 @@ public final class SqliteIndexRepository implements IndexRepository {
         return ex.getErrorCode() == 1 && ex.getMessage() != null && ex.getMessage().contains("no such table");
     }
 
-    private static List<String> splitStatements(String sql) {
+    static List<String> splitStatements(String sql) {
         String normalized = sql.replace("\r\n", "\n").replace("\r", "\n");
-        String[] raw = normalized.split(";");
         List<String> statements = new ArrayList<>();
-        for (String s : raw) {
-            String trimmed = s.trim();
-            if (!trimmed.isEmpty()) {
-                statements.add(trimmed);
+        StringBuilder current = new StringBuilder();
+        int beginDepth = 0;
+        for (int index = 0; index < normalized.length(); index++) {
+            char ch = normalized.charAt(index);
+            if (Character.isLetter(ch)) {
+                if (matchesKeyword(normalized, index, "BEGIN")) {
+                    beginDepth++;
+                } else if (matchesKeyword(normalized, index, "END")) {
+                    beginDepth = Math.max(0, beginDepth - 1);
+                }
+            }
+            if (ch == ';' && beginDepth == 0) {
+                String trimmed = current.toString().trim();
+                if (!trimmed.isEmpty()) {
+                    statements.add(trimmed);
+                }
+                current.setLength(0);
+            } else {
+                current.append(ch);
             }
         }
+        String trimmed = current.toString().trim();
+        if (!trimmed.isEmpty()) {
+            statements.add(trimmed);
+        }
         return statements;
+    }
+
+    private static boolean matchesKeyword(String sql, int index, String keyword) {
+        int length = keyword.length();
+        if (index + length > sql.length()) {
+            return false;
+        }
+        for (int offset = 0; offset < length; offset++) {
+            if (Character.toUpperCase(sql.charAt(index + offset)) != keyword.charAt(offset)) {
+                return false;
+            }
+        }
+        boolean beforeOk = index == 0 || !Character.isLetterOrDigit(sql.charAt(index - 1));
+        int afterIndex = index + length;
+        boolean afterOk = afterIndex >= sql.length() || !Character.isLetterOrDigit(sql.charAt(afterIndex));
+        return beforeOk && afterOk;
     }
 }

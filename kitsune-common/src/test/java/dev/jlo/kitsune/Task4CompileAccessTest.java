@@ -24,7 +24,7 @@ class Task4CompileAccessTest {
                  Statement stmt = connection.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT value FROM schema_metadata WHERE key = 'schema_version'")) {
                 assertTrue(rs.next(), "schema_version should exist after open");
-                assertEquals(2, rs.getInt(1), "open() must migrate repository to schema_version=2");
+                assertEquals(3, rs.getInt(1), "open() must migrate repository to schema_version=3");
             }
         }
     }

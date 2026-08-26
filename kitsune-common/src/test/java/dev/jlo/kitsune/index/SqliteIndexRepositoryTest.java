@@ -171,11 +171,11 @@ class SqliteIndexRepositoryTest {
         Path database = tempDir.resolve("index.db");
         try (RepositoryTestFixture first = new RepositoryTestFixture(database)) {
             first.repository().migrate();
-            assertEquals(2, schemaVersion(first.connection()));
+            assertEquals(3, schemaVersion(first.connection()));
         }
         try (RepositoryTestFixture second = new RepositoryTestFixture(database)) {
             second.repository().migrate();
-            assertEquals(2, schemaVersion(second.connection()));
+            assertEquals(3, schemaVersion(second.connection()));
         }
     }
 
@@ -318,12 +318,96 @@ class SqliteIndexRepositoryTest {
 
         try (IndexRepository ignored = SqliteIndexRepository.open(database);
              Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
-            assertEquals(2, schemaVersion(connection));
+            assertEquals(3, schemaVersion(connection));
             try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM embeddings");
                  ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next());
                 assertEquals(0, rs.getInt(1));
             }
+            assertTrue(tableExists(connection, "item_search"));
+            assertTrue(tableExists(connection, "item_fts"));
+        }
+    }
+
+    @Test
+    void splitStatementsKeepsCreateTriggerAsOneStatement() {
+        String sql = """
+                CREATE TABLE item_search (item_id INTEGER PRIMARY KEY);
+                CREATE TRIGGER item_search_ai AFTER INSERT ON item_search BEGIN
+                  INSERT INTO item_fts(rowid, material) VALUES (new.item_id, new.material);
+                END;
+                """;
+        List<String> statements = SqliteIndexRepository.splitStatements(sql);
+        assertEquals(2, statements.size());
+        assertTrue(statements.get(1).startsWith("CREATE TRIGGER"));
+        assertTrue(statements.get(1).endsWith("END"));
+    }
+
+    @Test
+    void migrateUpgradesV2DatabaseAndBackfillsItemSearch(@TempDir Path tempDir) throws Exception {
+        Path database = tempDir.resolve("v2-backfill.db");
+        UUID worldId = UUID.randomUUID();
+        BlockKey root = new BlockKey(worldId, 0, 64, 0);
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+                .materialKey("minecraft:oak_planks")
+                .amount(1)
+                .build();
+        EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+        Embedding embedding = provider.embed(descriptor);
+        createV2Database(database, root, descriptor, embedding, null);
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath())) {
+            connection.setAutoCommit(true);
+            SqliteIndexRepository repository = new SqliteIndexRepository(connection);
+            repository.migrate();
+            assertEquals(3, schemaVersion(connection));
+            assertEquals(tableCount(connection, "items"), tableCount(connection, "item_search"));
+            assertTrue(tableExists(connection, "item_fts"));
+
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT OR REPLACE INTO chunks (world_uuid, chunk_x, chunk_z, available, revision) "
+                            + "VALUES (?, ?, ?, 1, 1)")) {
+                ps.setString(1, worldId.toString());
+                ps.setInt(2, root.chunkKey().x());
+                ps.setInt(3, root.chunkKey().z());
+                ps.executeUpdate();
+            }
+
+            Map<BlockKey, List<IndexedItem>> documents =
+                    repository.loadDocuments(Set.of(root), provider);
+            IndexedItem loaded = documents.get(root).getFirst();
+            assertArrayEquals(embedding.encode(), loaded.embedding().encode());
+            assertEquals(embedding.norm(), loaded.embedding().norm(), 1e-9);
+        }
+    }
+
+    @Test
+    void migrateV2RollsBackWhenBackfillFails(@TempDir Path tempDir) throws Exception {
+        Path corruptDatabase = tempDir.resolve("v2-corrupt.db");
+        BlockKey root = new BlockKey(UUID.randomUUID(), 0, 64, 0);
+        ItemDescriptor descriptor = ItemDescriptor.builder()
+                .materialKey("minecraft:oak_planks")
+                .amount(1)
+                .build();
+        EmbeddingProvider provider = new SparseTagEmbeddingProvider();
+        Embedding embedding = provider.embed(descriptor);
+        createV2Database(corruptDatabase, root, descriptor, embedding, new byte[] {0x00});
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + corruptDatabase.toAbsolutePath())) {
+            connection.setAutoCommit(true);
+            SqliteIndexRepository repository = new SqliteIndexRepository(connection);
+            assertThrows(IllegalArgumentException.class, repository::migrate);
+            assertEquals(2, schemaVersion(connection));
+            assertFalse(tableExists(connection, "item_search"));
+            assertFalse(tableExists(connection, "item_fts"));
+        }
+
+        Path cleanDatabase = tempDir.resolve("v2-clean.db");
+        createV2Database(cleanDatabase, root, descriptor, embedding, null);
+        try (IndexRepository ignored = SqliteIndexRepository.open(cleanDatabase);
+             Connection connection = DriverManager.getConnection("jdbc:sqlite:" + cleanDatabase.toAbsolutePath())) {
+            assertEquals(3, schemaVersion(connection));
+            assertEquals(tableCount(connection, "items"), tableCount(connection, "item_search"));
         }
     }
 
@@ -891,6 +975,106 @@ class SqliteIndexRepositoryTest {
         @Override public boolean equals(Object o) { return false; }
         @Override public int hashCode() { return System.identityHashCode(this); }
     }
+
+    private static void createV2Database(
+            Path database,
+            BlockKey root,
+            ItemDescriptor descriptor,
+            Embedding embedding,
+            byte[] corruptDescriptor)
+            throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
+             java.sql.Statement statement = connection.createStatement()) {
+            for (String sql : v1Statements()) {
+                statement.execute(sql);
+            }
+            for (String sql : v2Statements()) {
+                statement.execute(sql);
+            }
+            statement.execute("INSERT INTO schema_metadata (key, value) VALUES ('schema_version', '2')");
+            statement.execute(
+                    "INSERT INTO containers (world_uuid, x, y, z, chunk_x, chunk_z, block_type, fingerprint, revision) "
+                            + "VALUES ('"
+                            + root.worldId()
+                            + "', "
+                            + root.x()
+                            + ", "
+                            + root.y()
+                            + ", "
+                            + root.z()
+                            + ", "
+                            + root.chunkKey().x()
+                            + ", "
+                            + root.chunkKey().z()
+                            + ", 'chest', X'010203', 1)");
+            try (PreparedStatement insertItem = connection.prepareStatement(
+                    "INSERT INTO items (container_id, path, amount, descriptor, provider_id, provider_version, vector, vector_norm) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                ItemPath path = new ItemPath(List.of(new ItemPathStep("Storage", 0)));
+                insertItem.setInt(1, 1);
+                insertItem.setBytes(2, ItemPathCodec.encode(path));
+                insertItem.setInt(3, descriptor.amount());
+                insertItem.setBytes(4, DescriptorCodec.encode(descriptor));
+                insertItem.setString(5, embedding.providerId());
+                insertItem.setInt(6, embedding.providerVersion());
+                insertItem.setBytes(7, embedding.encode());
+                insertItem.setDouble(8, embedding.norm());
+                insertItem.executeUpdate();
+
+                if (corruptDescriptor != null) {
+                    ItemPath corruptPath = new ItemPath(List.of(new ItemPathStep("Storage", 1)));
+                    insertItem.setInt(1, 1);
+                    insertItem.setBytes(2, ItemPathCodec.encode(corruptPath));
+                    insertItem.setInt(3, 1);
+                    insertItem.setBytes(4, corruptDescriptor);
+                    insertItem.setString(5, embedding.providerId());
+                    insertItem.setInt(6, embedding.providerVersion());
+                    insertItem.setBytes(7, embedding.encode());
+                    insertItem.setDouble(8, embedding.norm());
+                    insertItem.executeUpdate();
+                }
+            }
+        }
+    }
+
+    private static List<String> v2Statements() throws Exception {
+        try (var input = SqliteIndexRepository.class.getClassLoader()
+                .getResourceAsStream("db/migration/V2__embeddings_cache.sql")) {
+            if (input == null) {
+                throw new IllegalStateException("Missing migration V2__embeddings_cache.sql");
+            }
+            String sql = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n");
+            List<String> statements = new ArrayList<>();
+            for (String raw : sql.split(";")) {
+                String trimmed = raw.trim();
+                if (!trimmed.isEmpty()) {
+                    statements.add(trimmed);
+                }
+            }
+            return statements;
+        }
+    }
+
+    private static boolean tableExists(Connection connection, String table) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private static int tableCount(Connection connection, String table) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM " + table);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
 
     private static List<String> v1Statements() throws Exception {
         try (var input = SqliteIndexRepository.class.getClassLoader()
