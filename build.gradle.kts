@@ -7,6 +7,23 @@ allprojects {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/")
         maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "utilitiesGitHubPackages"
+                    url = uri("https://maven.pkg.github.com/mintychochip/Utilities")
+                    credentials {
+                        username = project.findProperty("gpr.user") as String?
+                            ?: System.getenv("GITHUB_ACTOR")
+                            ?: System.getenv("USERNAME")
+                        password = project.findProperty("gpr.key") as String? ?: System.getenv("GITHUB_TOKEN")
+                    }
+                }
+            }
+            filter {
+                includeGroup("org.aincraft")
+            }
+        }
     }
 }
 

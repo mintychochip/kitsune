@@ -2,12 +2,15 @@ package dev.jlo.kitsune.storage;
 
 import dev.jlo.kitsune.model.SearchHistoryEntry;
 
+import com.zaxxer.hikari.HikariConfig;
+import org.aincraft.db.sql.SqlDatabase;
+import org.jdbi.v3.core.Handle;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -29,7 +32,8 @@ public final class SearchHistoryStorage implements AutoCloseable {
     private static final String MIGRATION = "V3__search_history_and_radius.sql";
 
     private final Connection connection;
-    private final boolean ownsConnection;
+    private final Handle handle;
+    private final SqlDatabase database;
 
     /**
      * Creates storage over an existing SQLite connection.
@@ -38,12 +42,14 @@ public final class SearchHistoryStorage implements AutoCloseable {
      */
     public SearchHistoryStorage(Connection connection) {
         this.connection = Objects.requireNonNull(connection, "connection must not be null");
-        this.ownsConnection = false;
+        this.handle = null;
+        this.database = null;
     }
 
-    private SearchHistoryStorage(Connection connection, boolean ownsConnection) {
-        this.connection = connection;
-        this.ownsConnection = ownsConnection;
+    private SearchHistoryStorage(SqlDatabase database) {
+        this.database = Objects.requireNonNull(database, "database must not be null");
+        this.handle = database.jdbi().open();
+        this.connection = handle.getConnection();
     }
 
     /**
@@ -54,14 +60,66 @@ public final class SearchHistoryStorage implements AutoCloseable {
      * @throws SQLException if the database cannot be opened or initialized
      */
     public static SearchHistoryStorage open(Path path) throws SQLException {
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-        connection.setAutoCommit(true);
-        configureConnection(connection);
-        SearchHistoryStorage storage = new SearchHistoryStorage(connection, true);
-        storage.initialize();
-        return storage;
+        Objects.requireNonNull(path, "path must not be null");
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:sqlite:" + path.toAbsolutePath());
+        config.setDriverClassName("org.sqlite.JDBC");
+        config.setMaximumPoolSize(2);
+        config.setMinimumIdle(1);
+        SqlDatabase database = createDatabase(config);
+        SearchHistoryStorage storage = null;
+        try {
+            storage = new SearchHistoryStorage(database);
+            configureConnection(storage.connection);
+            if (!storage.hasTable("search_history")
+                    && !storage.hasTable("player_radius_limits")) {
+                migrateWithUtilities(database);
+            } else {
+                storage.initialize();
+            }
+            return storage;
+        } catch (SQLException | RuntimeException failure) {
+            if (storage != null) {
+                try {
+                    storage.close();
+                } catch (SQLException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            } else {
+                database.close();
+            }
+            throw failure;
+        }
+    }
+    private static SqlDatabase createDatabase(HikariConfig config) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(SearchHistoryStorage.class.getClassLoader());
+        try {
+            return SqlDatabase.create(config, "classpath:db/migration/history");
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
     }
 
+    private boolean hasTable(String table) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+            statement.setString(1, table);
+            try (ResultSet results = statement.executeQuery()) {
+                return results.next();
+            }
+        }
+    }
+
+    private static void migrateWithUtilities(SqlDatabase database) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(SearchHistoryStorage.class.getClassLoader());
+        try {
+            database.migrate();
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
     /**
      * Applies the search-history and player-radius schema to the supplied connection.
      *
@@ -220,8 +278,29 @@ public final class SearchHistoryStorage implements AutoCloseable {
 
     @Override
     public void close() throws SQLException {
-        if (ownsConnection) {
-            connection.close();
+        if (handle == null) {
+            return;
+        }
+        Throwable failure = null;
+        try {
+            handle.close();
+        } catch (Throwable closeFailure) {
+            failure = closeFailure;
+        }
+        try {
+            database.close();
+        } catch (Throwable closeFailure) {
+            if (failure == null) {
+                failure = closeFailure;
+            } else {
+                failure.addSuppressed(closeFailure);
+            }
+        }
+        if (failure instanceof SQLException sqlFailure) {
+            throw sqlFailure;
+        }
+        if (failure != null) {
+            throw new SQLException("Failed to close SQL storage", failure);
         }
     }
 
