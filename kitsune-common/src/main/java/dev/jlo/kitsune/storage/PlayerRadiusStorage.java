@@ -1,8 +1,12 @@
 package dev.jlo.kitsune.storage;
 
+import com.zaxxer.hikari.HikariConfig;
+import org.aincraft.db.sql.SqlDatabase;
+import org.jdbi.v3.core.Handle;
+
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
+import java.sql.Statement;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -18,9 +22,9 @@ import java.util.UUID;
 public final class PlayerRadiusStorage implements AutoCloseable {
     private static final int MIN_RADIUS = 1;
     private static final int MAX_RADIUS = 128;
-
     private final Connection connection;
-    private final boolean ownsConnection;
+    private final Handle handle;
+    private final SqlDatabase database;
     private final int defaultRadius;
 
     /**
@@ -31,14 +35,16 @@ public final class PlayerRadiusStorage implements AutoCloseable {
      */
     public PlayerRadiusStorage(Connection connection, int defaultRadius) {
         this.connection = Objects.requireNonNull(connection, "connection must not be null");
+        this.handle = null;
+        this.database = null;
         this.defaultRadius = validateRadius(defaultRadius);
-        this.ownsConnection = false;
     }
 
-    private PlayerRadiusStorage(Connection connection, int defaultRadius, boolean ownsConnection) {
-        this.connection = connection;
+    private PlayerRadiusStorage(SqlDatabase database, int defaultRadius) {
+        this.database = Objects.requireNonNull(database, "database must not be null");
         this.defaultRadius = validateRadius(defaultRadius);
-        this.ownsConnection = ownsConnection;
+        this.handle = database.jdbi().open();
+        this.connection = handle.getConnection();
     }
 
     /**
@@ -50,11 +56,70 @@ public final class PlayerRadiusStorage implements AutoCloseable {
      * @throws SQLException if the database cannot be opened or initialized
      */
     public static PlayerRadiusStorage open(Path path, int defaultRadius) throws SQLException {
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-        connection.setAutoCommit(true);
-        PlayerRadiusStorage storage = new PlayerRadiusStorage(connection, defaultRadius, true);
-        storage.initialize();
-        return storage;
+        Objects.requireNonNull(path, "path must not be null");
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:sqlite:" + path.toAbsolutePath());
+        config.setDriverClassName("org.sqlite.JDBC");
+        config.setMaximumPoolSize(2);
+        config.setMinimumIdle(1);
+        SqlDatabase database = createDatabase(config);
+        PlayerRadiusStorage storage = null;
+        try {
+            storage = new PlayerRadiusStorage(database, defaultRadius);
+            configureConnection(storage.connection);
+            if (!storage.hasTable("player_radius_limits")
+                    && !storage.hasTable("search_history")) {
+                migrateWithUtilities(database);
+            } else {
+                storage.initialize();
+            }
+            return storage;
+        } catch (SQLException | RuntimeException failure) {
+            if (storage != null) {
+                try {
+                    storage.close();
+                } catch (SQLException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            } else {
+                database.close();
+            }
+            throw failure;
+        }
+    }
+    private static SqlDatabase createDatabase(HikariConfig config) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(PlayerRadiusStorage.class.getClassLoader());
+        try {
+            return SqlDatabase.create(config, "classpath:db/migration/history");
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
+
+    private boolean hasTable(String table) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+            statement.setString(1, table);
+            try (ResultSet results = statement.executeQuery()) {
+                return results.next();
+            }
+        }
+    }
+    private static void migrateWithUtilities(SqlDatabase database) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(PlayerRadiusStorage.class.getClassLoader());
+        try {
+            database.migrate();
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
+    private static void configureConnection(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("PRAGMA foreign_keys=ON");
+        }
     }
 
     /**
@@ -140,8 +205,29 @@ public final class PlayerRadiusStorage implements AutoCloseable {
 
     @Override
     public void close() throws SQLException {
-        if (ownsConnection) {
-            connection.close();
+        if (handle == null) {
+            return;
+        }
+        Throwable failure = null;
+        try {
+            handle.close();
+        } catch (Throwable closeFailure) {
+            failure = closeFailure;
+        }
+        try {
+            database.close();
+        } catch (Throwable closeFailure) {
+            if (failure == null) {
+                failure = closeFailure;
+            } else {
+                failure.addSuppressed(closeFailure);
+            }
+        }
+        if (failure instanceof SQLException sqlFailure) {
+            throw sqlFailure;
+        }
+        if (failure != null) {
+            throw new SQLException("Failed to close SQL storage", failure);
         }
     }
 

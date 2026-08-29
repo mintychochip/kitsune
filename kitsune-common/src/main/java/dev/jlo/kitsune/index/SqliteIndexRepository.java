@@ -10,12 +10,15 @@ import dev.jlo.kitsune.model.ItemDescriptor;
 import dev.jlo.kitsune.model.ItemPath;
 import dev.jlo.kitsune.model.RootIdentity;
 
+import com.zaxxer.hikari.HikariConfig;
+import org.aincraft.db.sql.SqlDatabase;
+import org.jdbi.v3.core.Handle;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -45,6 +48,8 @@ public final class SqliteIndexRepository implements IndexRepository {
     private static final int REEMBED_BATCH = 256;
 
     private final Connection connection;
+    private final SqlDatabase database;
+    private final Handle handle;
 
     /**
      * Creates a repository over an existing SQLite connection and configures
@@ -54,7 +59,25 @@ public final class SqliteIndexRepository implements IndexRepository {
      * @throws SQLException if connection configuration fails
      */
     SqliteIndexRepository(Connection connection) throws SQLException {
-        this.connection = connection;
+        this.connection = Objects.requireNonNull(connection, "connection must not be null");
+        this.database = null;
+        this.handle = null;
+        configureConnection(connection);
+    }
+
+    private SqliteIndexRepository(SqlDatabase database) throws SQLException {
+        this.database = Objects.requireNonNull(database, "database must not be null");
+        this.handle = database.jdbi().open();
+        this.connection = handle.getConnection();
+        try {
+            configureConnection(connection);
+        } catch (SQLException failure) {
+            handle.close();
+            throw failure;
+        }
+    }
+
+    private static void configureConnection(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA journal_mode=WAL");
             statement.execute("PRAGMA foreign_keys=ON");
@@ -85,38 +108,45 @@ public final class SqliteIndexRepository implements IndexRepository {
      * @throws SQLException if the database cannot be opened or migrated
      */
     public static IndexRepository open(Path path, EmbeddingProvider provider) throws SQLException {
-        Connection connection = null;
+        Objects.requireNonNull(path, "path must not be null");
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:sqlite:" + path.toAbsolutePath());
+        config.setDriverClassName("org.sqlite.JDBC");
+        config.setMaximumPoolSize(2);
+        config.setMinimumIdle(1);
+        SqlDatabase database = createDatabase(config);
+        SqliteIndexRepository repository = null;
         try {
-            connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-            connection.setAutoCommit(true);
-            SqliteIndexRepository repository = new SqliteIndexRepository(connection);
+            repository = new SqliteIndexRepository(database);
             repository.migrate();
             repository.markAllChunksUnavailable();
             if (provider != null) {
                 repository.reembedIfMismatched(provider);
             }
             return repository;
-        } catch (SQLException ex) {
-            closeWithSuppressed(connection, ex);
-            throw ex;
-        } catch (RuntimeException ex) {
-            closeWithSuppressed(connection, ex);
-            throw ex;
-        } catch (Exception ex) {
-            SQLException wrapped = new SQLException("Failed to open repository", ex);
-            closeWithSuppressed(connection, wrapped);
-            throw wrapped;
+        } catch (SQLException | RuntimeException failure) {
+            if (repository != null) {
+                try {
+                    repository.close();
+                } catch (Exception closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            } else {
+                database.close();
+            }
+            throw failure;
+        }
+    }
+    private static SqlDatabase createDatabase(HikariConfig config) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(SqliteIndexRepository.class.getClassLoader());
+        try {
+            return SqlDatabase.create(config, "classpath:db/migration/index");
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
         }
     }
 
-    private static void closeWithSuppressed(Connection connection, Throwable primary) {
-        if (connection == null) return;
-        try {
-            connection.close();
-        } catch (Exception closeFailure) {
-            primary.addSuppressed(closeFailure);
-        }
-    }
 
     @Override
     public void migrate() throws SQLException {
@@ -124,6 +154,11 @@ public final class SqliteIndexRepository implements IndexRepository {
         Throwable primary = null;
         try {
             Integer current = currentSchemaVersion();
+            if (database != null && !hasTable("schema_metadata")) {
+                migrateWithUtilities();
+                finishFreshMigration();
+                return;
+            }
             if (current != null && current == 3) {
                 connection.setAutoCommit(false);
                 try (Statement statement = connection.createStatement()) {
@@ -179,6 +214,60 @@ public final class SqliteIndexRepository implements IndexRepository {
                     runtimeEx.addSuppressed(restoreEx);
                 } else if (primary == null) {
                     throw restoreEx;
+                }
+            }
+        }
+    }
+    private void migrateWithUtilities() {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(SqliteIndexRepository.class.getClassLoader());
+        try {
+            database.migrate();
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
+    private boolean hasTable(String table) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+            statement.setString(1, table);
+            try (ResultSet results = statement.executeQuery()) {
+                return results.next();
+            }
+        }
+    }
+
+    private void finishFreshMigration() throws SQLException {
+        connection.setAutoCommit(false);
+        Throwable primary = null;
+        try (Statement statement = connection.createStatement()) {
+            ensureFtsDeleteTriggers(statement);
+            backfillItemSearch();
+            verifyItemSearchCounts();
+            try (PreparedStatement metadata = connection.prepareStatement(
+                    "INSERT INTO schema_metadata (key, value) VALUES (?, ?) "
+                            + "ON CONFLICT(key) DO UPDATE SET value = excluded.value")) {
+                metadata.setString(1, "schema_version");
+                metadata.setString(2, "3");
+                metadata.executeUpdate();
+            }
+            connection.commit();
+        } catch (RuntimeException | SQLException failure) {
+            primary = failure;
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
+            }
+            throw failure;
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException restoreFailure) {
+                if (primary != null) {
+                    primary.addSuppressed(restoreFailure);
+                } else {
+                    throw restoreFailure;
                 }
             }
         }
@@ -875,7 +964,28 @@ public final class SqliteIndexRepository implements IndexRepository {
 
     @Override
     public void close() throws Exception {
-        connection.close();
+        if (handle == null) {
+            connection.close();
+            return;
+        }
+        Exception failure = null;
+        try {
+            handle.close();
+        } catch (Exception closeFailure) {
+            failure = closeFailure;
+        }
+        try {
+            database.close();
+        } catch (Exception closeFailure) {
+            if (failure == null) {
+                failure = closeFailure;
+            } else {
+                failure.addSuppressed(closeFailure);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     private static String readMigration(String name) {
